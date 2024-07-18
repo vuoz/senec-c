@@ -1,1 +1,1 @@
-cargo run
+cargo run  -- --partition-table partition.csv
