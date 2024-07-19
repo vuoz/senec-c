@@ -33,9 +33,6 @@ fn main() -> Result<()> {
     // get peripherals
     let peripherals = Peripherals::take()?;
 
-    // connecting to wifi
-    let mut _wifi = connect_to_wifi(peripherals.modem, wifi_ssid, wifi_password)?;
-
     // setting up display
     let (mut display, mut epd, mut driver) = init_display(
         peripherals.spi2,
@@ -47,6 +44,20 @@ fn main() -> Result<()> {
         peripherals.pins.gpio17,
     )?;
     log::info!("Got the display");
+
+    // connecting to wifi
+    display.draw_status_message("Connecting to Wifi")?;
+    epd.update_and_display_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+    epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+
+    let mut _wifi = connect_to_wifi(peripherals.modem, wifi_ssid, wifi_password)?;
+
+    // update display
+    display.clear_status_message()?;
+    display.draw_status_message("Wifi success")?;
+    epd.update_new_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+    epd.display_new_frame(&mut driver, &mut delay::Ets)?;
+
     let default_text_style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
         .text_color(BinaryColor::On)
@@ -57,19 +68,20 @@ fn main() -> Result<()> {
 
     let mut retries = 0;
     loop {
+        log::info!("Retry: {}", retries);
+        if retries > 5 {
+            break;
+        }
         // Clear the display from any remainders
-        epd.clear_frame(&mut driver, &mut delay::Ets)?;
-        display.clear(BinaryColor::Off)?;
+        display.clear_status_message()?;
+        epd.update_new_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+        epd.display_new_frame(&mut driver, &mut delay::Ets)?;
 
-        // draw the ui with default values
+        // drawing default interface
         display.draw_default_display(default_text_style)?;
         epd.update_and_display_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
         epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
 
-        if retries > 5 {
-            break;
-        }
-        log::info!("Retry: {}", retries);
         let mut read_cursor = 0;
         // we dont need this after the intial request was send
         let mut write_buf = [0; 500];

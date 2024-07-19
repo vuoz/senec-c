@@ -1215,6 +1215,24 @@ impl DisplayBoxed {
 
         Ok(())
     }
+    pub fn draw_status_message(&mut self, msg: &str) -> anyhow::Result<()> {
+        let style = MonoTextStyleBuilder::new()
+            .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
+            .text_color(BinaryColor::On)
+            .build();
+        Text::new(msg, Point::new(58, 64), style).draw(self)?;
+        Ok(())
+    }
+    pub fn clear_status_message(&mut self) -> anyhow::Result<()> {
+        self.fill_solid(
+            &Rectangle::new(
+                Point::new(58, 50),
+                embedded_graphics::prelude::Size::new(180, 20),
+            ),
+            BinaryColor::Off,
+        )?;
+        Ok(())
+    }
     fn draw_default_total(&mut self) -> anyhow::Result<()> {
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
