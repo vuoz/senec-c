@@ -1,44 +1,39 @@
+use crate::types::HourlyNew;
 use anyhow::anyhow;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::iterator::PixelIteratorExt;
-use embedded_graphics::mono_font::MonoTextStyleBuilder;
-use embedded_graphics::prelude::Size;
-
 use embedded_graphics::mono_font::MonoTextStyle;
+use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::OriginDimensions;
 use embedded_graphics::prelude::Point;
+use embedded_graphics::prelude::Size;
 use embedded_graphics::primitives::*;
 use embedded_graphics::text::Text;
 use embedded_graphics::Drawable;
 use embedded_graphics::Pixel;
-
+use epd_waveshare::epd2in9_v2::Epd2in9;
 use epd_waveshare::prelude::Display;
 use epd_waveshare::prelude::DisplayRotation;
+use epd_waveshare::{prelude::WaveshareDisplay, *};
+use esp_idf_hal::delay;
 use esp_idf_hal::delay::Ets;
+use esp_idf_hal::gpio;
 use esp_idf_hal::gpio::Gpio10;
 use esp_idf_hal::gpio::Gpio17;
 use esp_idf_hal::gpio::Gpio18;
 use esp_idf_hal::gpio::Gpio21;
 use esp_idf_hal::gpio::Gpio38;
 use esp_idf_hal::gpio::Gpio48;
-use esp_idf_hal::spi::SPI2;
-use esp_idf_hal::units::Hertz;
-
-use epd_waveshare::epd2in9_v2::Epd2in9;
-use esp_idf_hal::gpio;
 use esp_idf_hal::gpio::Input;
 use esp_idf_hal::gpio::Output;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::spi;
 use esp_idf_hal::spi::SpiDeviceDriver;
 use esp_idf_hal::spi::SpiDriver;
+use esp_idf_hal::spi::SPI2;
+use esp_idf_hal::units::Hertz;
 
-use esp_idf_hal::delay;
-
-use epd_waveshare::{prelude::WaveshareDisplay, *};
-
-use crate::types::HourlyNew;
 // this is for the direction power is comming from
 enum ArrowDirection {
     Left,
@@ -860,7 +855,7 @@ impl DisplayBoxed {
             .text_color(BinaryColor::On)
             .build();
         if sunset.len() > 5 || sunrise.len() > 5 {
-            return Err(anyhow!("error input to long"));
+            return Err(anyhow!("error input sequence to long"));
         }
 
         // clears both text areas
