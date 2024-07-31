@@ -17,3 +17,6 @@ Build on Windows using wsl ( again check the dependencies of espflash etc.):
 ```shell
 sh w.sh
 ```
+### Todos
+- [ ] Add code to check battery percentage and update display
+- [ ] Add code to check for charging status
