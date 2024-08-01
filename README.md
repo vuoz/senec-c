@@ -1,6 +1,6 @@
 ### Senec Client
 
-
+### Reproduce
 Add .env file!
 
 ```shell
@@ -27,6 +27,14 @@ sh w.sh
 - [1100mAh LiPo battery 3.7V](https://www.amazon.de/EEMB-Lithium-Wiederaufladbarer-Lipo-Akku-JST-Anschluss/dp/B08FD39Y5R)
 - [TP4056 LiPo Charger](https://www.amazon.de/-/en/dp/B07XG5F9T3)
 - [Simple on off switches](https://www.amazon.de/-/en/dp/B09QQKMWRR)
+
+
+### Assembled Version
+
+![assembled](https://github.com/user-attachments/assets/8fb80f75-c8ca-481f-b833-c66c744cd7ce)
+
+
+
 
 ### Todos
 - [ ] Add code to check battery percentage and update display
