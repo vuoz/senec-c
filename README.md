@@ -10,6 +10,8 @@ SERVER_ADDR=
 ```
 SEVER_ADDR is the adress of the senec server inside your local network
 
+Previous tracking of this repo happend over at: [prev repo](https://github.com/vuoz/senec-client)
+This contains all the progress including the very first commit
 
 Build on Linux/MacOS ( check dependencies of espflash etc.):
 ```shell
