@@ -113,6 +113,7 @@ fn main() -> Result<()> {
         let mut curr_time = std::time::SystemTime::now();
 
         let mut flushed = true;
+        let mut prev_error = false;
         'inner: loop {
             match framer.read(&mut stream, &mut frame_buf) {
                 Ok(read_res) => match read_res {
@@ -123,14 +124,26 @@ fn main() -> Result<()> {
                         let time_now = std::time::SystemTime::now();
                         let since = time_now.duration_since(curr_time)?;
                         if since > Duration::from_secs(120) {
+                            let last_buff = display.buffer();
+                            let prev_buffer = last_buff.to_vec();
                             display.clear_buffer(Color::White);
                             display.draw_default_display(default_text_style)?;
-                            display.set_connected()?;
-                            epd.update_and_display_frame(
-                                &mut driver,
-                                display.buffer(),
-                                &mut delay::Ets,
-                            )?;
+                            // in the case that the screen was an error screen before we need to
+                            // repaint the default display
+                            if prev_error {
+                                epd.update_and_display_frame(
+                                    &mut driver,
+                                    display.buffer(),
+                                    &mut delay::Ets,
+                                )?;
+                            } else {
+                                epd.update_and_display_frame(
+                                    &mut driver,
+                                    prev_buffer.as_slice(),
+                                    &mut delay::Ets,
+                                )?;
+                            }
+
                             epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
                             curr_time = time_now;
                             flushed = true;
@@ -248,7 +261,7 @@ fn main() -> Result<()> {
                                     display.buffer(),
                                     &mut delay::Ets,
                                 )?;
-
+                                prev_error = false;
                                 continue;
                             }
                             Err(e) => {
@@ -271,6 +284,7 @@ fn main() -> Result<()> {
                                 // sleep for 12s to reduce power consumption
                                 // still todo
 
+                                prev_error = true;
                                 continue;
                             }
                         }

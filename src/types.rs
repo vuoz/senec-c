@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NewUiStruct<'a> {
     pub ts: &'a str,
     pub stat_state: &'a str,
@@ -15,27 +15,27 @@ pub struct NewUiStruct<'a> {
     pub total_data: TotalDataNew<'a>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TotalDataNew<'a> {
     pub consumption: &'a str,
     pub generated: &'a str,
     pub new: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WeatherNew {
     pub hourly: HourlyNew,
     pub daily: DailyNew,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DailyNew {
     pub time: Vec<String>,
     pub sunset: Vec<String>,
     pub sunrise: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HourlyNew {
     pub time: Vec<String>,
     #[serde(rename = "temperature_2m")]
