@@ -30,6 +30,9 @@ sh w.sh
 - [TP4056 LiPo Charger](https://www.amazon.de/-/en/dp/B07XG5F9T3)
 - [Simple on off switches](https://www.amazon.de/-/en/dp/B09QQKMWRR)
 
+### PCB for faster assembly
+Take the .zip file from /gerbers and upload it to any PCB manufacturer of you choice
+
 
 ### Assembled Version
 
