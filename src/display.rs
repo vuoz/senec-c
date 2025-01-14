@@ -52,7 +52,7 @@ pub enum ConnectionDirection {
     Left(bool),
     Bottom(bool),
 }
-// trying to avoid stack overflows  so we use heap alloc
+// trying to avoid stack overflows so we use heap alloc
 pub struct DisplayBoxed(Box<epd2in9_v2::Display2in9>);
 
 impl DrawTarget for DisplayBoxed {
