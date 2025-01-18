@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NewUiStruct<'a> {
     pub ts: &'a str,
@@ -13,6 +12,11 @@ pub struct NewUiStruct<'a> {
     pub gui_boosting_info: &'a str,
     pub weather: WeatherNew,
     pub total_data: TotalDataNew<'a>,
+    pub prediction: Option<Prediction /*<'a>*/>,
+}
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct Prediction {
+    pub prediction: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

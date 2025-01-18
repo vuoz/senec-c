@@ -2,9 +2,13 @@ pub mod client;
 pub mod display;
 pub mod types;
 pub mod wifi;
-
+// proto defitions
+pub mod prototypes {
+    pub mod types {
+        include!(concat!(env!("OUT_DIR"), "/prototypes.types.rs"));
+    }
+}
 use client::{convert_connect_error, create_tcp_conn_and_client};
-use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
@@ -14,6 +18,7 @@ use embedded_websocket::framer::{Framer, ReadResult};
 use epd_waveshare::prelude::WaveshareDisplay;
 use epd_waveshare::prelude::*;
 use esp_idf_hal::delay;
+use prost::Message;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -87,7 +92,7 @@ fn main() -> Result<()> {
         let mut write_buf = [0; 500];
         let mut read_buf = [0; 500];
 
-        let mut frame_buf = [0; 2000];
+        let mut frame_buf = [0; 1000];
         log::info!("Starting tcp conn to addr: {} ", server_addr);
         let (mut stream, options, mut client) = create_tcp_conn_and_client(server_addr)?;
         log::info!("tcp conn success");
@@ -109,17 +114,41 @@ fn main() -> Result<()> {
         epd.display_new_frame(&mut driver, &mut delay::Ets)?;
         epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
 
-        // start time
+        //start time
         let mut curr_time = std::time::SystemTime::now();
+
+        let mut rescaled = (0..288).into_iter().map(|_| 0.0).collect::<Vec<f32>>();
 
         let mut flushed = true;
         let mut prev_error = false;
         'inner: loop {
             match framer.read(&mut stream, &mut frame_buf) {
                 Ok(read_res) => match read_res {
-                    ReadResult::Binary(_) => continue,
+                    ReadResult::Binary(b) => {
+                        let new_buf = b.to_vec();
+                        let prediction = match prototypes::types::Prediction::decode(&new_buf[..]) {
+                            Ok(predictions) => predictions,
+                            Err(e) => {
+                                println!("error decoding prediction: {:?}", e);
+                                continue;
+                            }
+                        };
+                        if prediction.prediction.len() != 288 {
+                            continue;
+                        }
+                        // rescaling the values. over the wire the values were encoded using i32
+                        // instead of f32. since the values are in the range of 0-12 this saves
+                        // stream bandwidth
+                        for (i, v) in prediction.prediction.iter().enumerate() {
+                            rescaled[i] = *v as f32 / 1000.0;
+                        }
+                        continue;
+                    }
                     ReadResult::Pong(_) => continue,
-                    ReadResult::Closed => continue,
+                    ReadResult::Closed => {
+                        println!("stream closed");
+                        break 'inner;
+                    }
                     ReadResult::Text(t) => {
                         let time_now = std::time::SystemTime::now();
                         let since = time_now.duration_since(curr_time)?;
@@ -149,149 +178,110 @@ fn main() -> Result<()> {
                             flushed = true;
                         }
                         log::info!("Got a message {}", t);
+                        if let Ok(json_values) = serde_json::from_str::<types::NewUiStruct>(t) {
+                            display.clear_text()?;
+                            display.draw_text(
+                                default_text_style,
+                                json_values.gui_house_pow,
+                                &match json_values.gui_bat_data_power.contains("-") {
+                                    // meaning the battery is being charged
+                                    false => {
+                                        format!("+{}", json_values.gui_bat_data_fuel_charge)
+                                    }
+                                    // meaning battery is being discharged
+                                    true => {
+                                        format!("-{}", json_values.gui_bat_data_fuel_charge)
+                                    }
+                                },
+                                json_values.gui_inverter_power,
+                                &match json_values.gui_grid_pow.starts_with("-") {
+                                    true => format!("{}", json_values.gui_grid_pow),
+                                    false => format!("+{}", json_values.gui_grid_pow),
+                                },
+                                json_values.ts,
+                            )?;
 
-                        match serde_json::from_str::<types::NewUiStruct>(t) {
-                            Ok(json_values) => {
-                                display.clear_text()?;
-                                display.draw_text(
-                                    default_text_style,
-                                    json_values.gui_house_pow,
-                                    &match json_values.gui_bat_data_power.contains("-") {
-                                        // meaning the battery is being charged
-                                        false => {
-                                            format!("+{}", json_values.gui_bat_data_fuel_charge)
-                                        }
-                                        // meaning battery is being discharged
-                                        true => {
-                                            format!("-{}", json_values.gui_bat_data_fuel_charge)
-                                        }
-                                    },
-                                    json_values.gui_inverter_power,
-                                    &match json_values.gui_grid_pow.starts_with("-") {
-                                        true => format!("{}", json_values.gui_grid_pow),
-                                        false => format!("+{}", json_values.gui_grid_pow),
-                                    },
-                                    json_values.ts,
-                                )?;
+                            // to the house always active
+                            display.draw_connections(display::ConnectionDirection::Top(true))?;
 
-                                // to the house always active
+                            // will rework the conditions in the future
+
+                            if json_values.gui_bat_data_power != "0.00"
+                                && !json_values.gui_bat_data_power.starts_with("-")
+                            {
+                                // to the battery since it is being discharged
+                                display.draw_connections(display::ConnectionDirection::Bottom(
+                                    false,
+                                ))?;
+                            }
+                            if json_values.gui_bat_data_power.starts_with("-")
+                                && json_values.gui_bat_data_power != "0.00"
+                            {
                                 display
-                                    .draw_connections(display::ConnectionDirection::Top(true))?;
-
-                                // will rework the conditions in the future
-
-                                if json_values.gui_bat_data_power != "0.00"
-                                    && !json_values.gui_bat_data_power.starts_with("-")
-                                {
-                                    // to the battery since it is being discharged
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Bottom(false),
-                                    )?;
-                                }
-                                if json_values.gui_bat_data_power.starts_with("-")
-                                    && json_values.gui_bat_data_power != "0.00"
-                                {
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Bottom(false),
-                                    )?
-                                } else if !json_values.gui_bat_data_power.starts_with("-")
-                                    && json_values.gui_bat_data_power != "0.00"
-                                {
-                                    // to the battery since it is being charged
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Bottom(true),
-                                    )?;
-                                }
-
-                                // power send to the grid
-                                if json_values.gui_grid_pow.starts_with("-")
-                                    && json_values.gui_grid_pow != "-0.00"
-                                {
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Right(true),
-                                    )?;
-                                } else if !json_values.gui_grid_pow.starts_with("-")
-                                    && json_values.gui_grid_pow != "0.00"
-                                {
-                                    // power taken from the grid
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Right(false),
-                                    )?;
-                                }
-
-                                if json_values.gui_inverter_power != "0.00"
-                                    && !json_values.gui_inverter_power.starts_with("-")
-                                {
-                                    display.draw_connections(
-                                        display::ConnectionDirection::Left(false),
-                                    )?;
-                                }
-
-                                if json_values.total_data.new || flushed {
-                                    display.update_total_display(
-                                        json_values.total_data.consumption,
-                                        json_values.total_data.generated,
-                                    )?;
-                                    // this only needs to be updated every hour
-                                    let sunrise = json_values
-                                        .weather
-                                        .daily
-                                        .sunrise
-                                        .get(0)
-                                        .ok_or(anyhow!("error value not present"))?;
-                                    let sunset = json_values
-                                        .weather
-                                        .daily
-                                        .sunset
-                                        .get(0)
-                                        .ok_or(anyhow!("error value not present"))?;
-                                    display.update_sun_data(sunrise, sunset)?;
-                                    display.update_weather_data(json_values.weather.hourly)?;
-                                    flushed = false;
-                                }
-
-                                epd.update_new_frame(
-                                    &mut driver,
-                                    display.buffer(),
-                                    &mut delay::Ets,
-                                )?;
-                                epd.display_new_frame(&mut driver, &mut delay::Ets)?;
-                                epd.update_old_frame(
-                                    &mut driver,
-                                    display.buffer(),
-                                    &mut delay::Ets,
-                                )?;
-                                prev_error = false;
-                                continue;
+                                    .draw_connections(display::ConnectionDirection::Bottom(false))?
+                            } else if !json_values.gui_bat_data_power.starts_with("-")
+                                && json_values.gui_bat_data_power != "0.00"
+                            {
+                                // to the battery since it is being charged
+                                display
+                                    .draw_connections(display::ConnectionDirection::Bottom(true))?;
                             }
-                            Err(e) => {
-                                log::info!("An error occured: {:?} Message: {:?}  ", e, t);
-                                display.clear(BinaryColor::Off)?;
-                                display.display_error_message(
-                                    "Error decoding message!",
-                                    default_text_style,
-                                )?;
-                                epd.update_and_display_frame(
-                                    &mut driver,
-                                    display.buffer(),
-                                    &mut delay::Ets,
-                                )?;
-                                epd.update_old_frame(
-                                    &mut driver,
-                                    display.buffer(),
-                                    &mut delay::Ets,
-                                )?;
-                                // sleep for 12s to reduce power consumption
-                                // still todo
 
-                                prev_error = true;
-                                continue;
+                            // power send to the grid
+                            if json_values.gui_grid_pow.starts_with("-")
+                                && json_values.gui_grid_pow != "-0.00"
+                            {
+                                display
+                                    .draw_connections(display::ConnectionDirection::Right(true))?;
+                            } else if !json_values.gui_grid_pow.starts_with("-")
+                                && json_values.gui_grid_pow != "0.00"
+                            {
+                                // power taken from the grid
+                                display
+                                    .draw_connections(display::ConnectionDirection::Right(false))?;
                             }
-                        }
+
+                            if json_values.gui_inverter_power != "0.00"
+                                && !json_values.gui_inverter_power.starts_with("-")
+                            {
+                                display
+                                    .draw_connections(display::ConnectionDirection::Left(false))?;
+                            }
+
+                            if json_values.total_data.new || flushed {
+                                display.update_total_display(
+                                    json_values.total_data.consumption,
+                                    json_values.total_data.generated,
+                                )?;
+                                // this only needs to be updated every hour
+                                let sunrise = json_values
+                                    .weather
+                                    .daily
+                                    .sunrise
+                                    .get(0)
+                                    .ok_or(anyhow!("error value not present"))?;
+                                let sunset = json_values
+                                    .weather
+                                    .daily
+                                    .sunset
+                                    .get(0)
+                                    .ok_or(anyhow!("error value not present"))?;
+                                display.update_sun_data(sunrise, sunset)?;
+                                display.update_weather_data(json_values.weather.hourly)?;
+                                flushed = false;
+                            }
+
+                            epd.update_new_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+                            epd.display_new_frame(&mut driver, &mut delay::Ets)?;
+                            epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
+                            prev_error = false;
+                            continue;
+                        };
+                        println!("Error parsing json");
                     }
                 },
                 Err(e) => {
-                    println!("Error :{:?}", e);
+                    println!("Error reading ws socket:{:?}", e);
                     break 'inner;
                 }
             }

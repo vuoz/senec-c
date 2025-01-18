@@ -1,5 +1,7 @@
 use dotenv::dotenv;
-fn main() {
+fn main() -> std::io::Result<()> {
+    prost_build::compile_protos(&["src/types.proto"], &["src/"])?;
+
     // read the env vars from .env and set them as rustc env vars so the compiler can read them
     // and include them on compile time
 
@@ -22,5 +24,8 @@ fn main() {
             println!("cargo:rustc-env=SERVER_ADDR={}", addr);
         }
     }
+    println!("cargo:rustc-env=CRATE_CC_NO_DEFAULTS=1");
+
     embuild::espidf::sysenv::output();
+    Ok(())
 }

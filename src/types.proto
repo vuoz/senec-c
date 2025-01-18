@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+package prototypes.types;
+message Prediction {
+    repeated int32 prediction = 1;
+}

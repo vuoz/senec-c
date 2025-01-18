@@ -9,8 +9,11 @@
         "--workspace",
         "--message-format=json",
         "--all-targets"
-      ]
+      ],
+      "rust-analyzer.cargo.extraEnv": {
+        "CRATE_CC_NO_DEFAULTS":"1"
+      },
+      "rust-analyzer.checkOnSave": true
     }
   }
 }
-

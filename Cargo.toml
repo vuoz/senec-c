@@ -34,12 +34,15 @@ epd-waveshare = "0.5.0"
 embedded-graphics = "=0.7"
 embedded-svc = "0.26.4"
 anyhow = "1.0.79"
-embedded-websocket = "0.9.3"
+embedded-websocket = {version = "0.9.3"}
 heapless = { version = "0.8.0", features = ["serde"] }
 rand = "0.8.5"
 serde_json = "1.0.113"
 serde = "1.0.195"
 embedded-hal = "0.2.7"
+prost = {version = "0.13.2",default-features = false, features = ["prost-derive"]}
+prost-types = "0.13"
 [build-dependencies]
+prost-build = "0.13.4"
 embuild = "0.31.3"
 dotenv = "0.15.0"
