@@ -1,4 +1,4 @@
-use crate::types::HourlyNew;
+use crate::prototypes::types::HourlyNew;
 use anyhow::anyhow;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::iterator::PixelIteratorExt;
@@ -1088,7 +1088,7 @@ impl DisplayBoxed {
                 .get(idx)
                 .ok_or(anyhow!("error missing data"))?;
             let temp = weather_data
-                .temperature_2_m
+                .temperature_2m
                 .get(idx)
                 .ok_or(anyhow!("error missing data"))?;
 

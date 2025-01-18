@@ -2,5 +2,51 @@ syntax = "proto3";
 
 package prototypes.types;
 message Prediction {
-    repeated int32 prediction = 1;
+    repeated int32 prediction = 14;
+}
+message data{
+    oneof oneof{
+       NewUiStruct uiData = 1;
+       Prediction prediction = 2;
+    }
+}
+message NewUiStruct {
+  string ts = 1;
+  string stat_state = 2;
+  string gui_bat_data_power = 3;
+  string gui_inverter_power = 4;
+  string gui_house_pow = 5;
+  string gui_grid_pow = 6;
+  string gui_bat_data_fuel_charge = 7;
+  string gui_charging_info = 8;
+  string gui_boosting_info = 9;
+  WeatherNew weather = 10;
+  TotalDataNew total_data = 11;
+}
+
+message TotalDataNew {
+  string consumption = 1;
+  string generated = 2;
+  bool new = 3;
+}
+
+message WeatherNew {
+  HourlyNew hourly = 1;
+  DailyNew daily = 2;
+}
+
+message DailyNew {
+  repeated string time = 1;
+  repeated string sunset = 2;
+  repeated string sunrise = 3;
+}
+
+message HourlyNew {
+  repeated string time = 1;
+  repeated string temperature_2m = 2;
+  repeated string rain = 3;
+  repeated string showers = 4;
+  repeated string cloud_cover = 5;
+  repeated string uv_index = 6;
+  repeated string uv_index_clear_sky = 7;
 }
