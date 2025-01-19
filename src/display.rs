@@ -297,7 +297,173 @@ static SUN_PATTERN: [u8; 270] = [
     0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
+fn max_in_slice(slice: &[f32]) -> Option<f32> {
+    slice.iter().fold(None, |max, &x| match max {
+        None => Some(x),
+        Some(m) => Some(m.max(x)),
+    })
+}
 impl DisplayBoxed {
+    pub fn draw_chart(&mut self, data: &[f32]) -> anyhow::Result<()> {
+        let desc_text_style = MonoTextStyleBuilder::new()
+            .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
+            .text_color(BinaryColor::On)
+            .build();
+
+        let line_style = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+        Line::new(Point::new(153, 124), Point::new(286, 124))
+            .into_styled(line_style)
+            .draw(self)?;
+
+        self.fill_solid(
+            &Rectangle::new(Point::new(217, 124), Size::new(9, 8)),
+            BinaryColor::Off,
+        )?;
+        self.fill_solid(
+            &Rectangle::new(Point::new(149, 121), Size::new(2, 7)),
+            BinaryColor::Off,
+        )?;
+        Text::new("0", Point::new(149, 126), desc_text_style).draw(self)?;
+        Text::new("12", Point::new(218, 126), desc_text_style).draw(self)?;
+        Text::new("24", Point::new(288, 126), desc_text_style).draw(self)?;
+
+        let max = max_in_slice(&data).ok_or(anyhow!("error finding max value"))?;
+        self.fill_solid(
+            &Rectangle::new(Point::new(145, 75), Size::new(10, 8)),
+            BinaryColor::Off,
+        )?;
+        if max >= 10.0 {
+            Text::new(
+                &format!("{:.2} kW", max),
+                Point::new(145, 80),
+                desc_text_style,
+            )
+            .draw(self)?;
+        } else {
+            Text::new(
+                &format!("{:.2} kW", max),
+                Point::new(143, 80),
+                desc_text_style,
+            )
+            .draw(self)?;
+        }
+        let mut averaged = data
+            .chunks(2)
+            .map(|values| {
+                let sum: f32 = values.iter().sum();
+                sum / values.len() as f32
+            })
+            .collect::<Vec<f32>>();
+
+        // scaling to size of display
+        averaged
+            .iter_mut()
+            .for_each(|value| *value = (*value / max * 45.0).round());
+
+        let start_x = 151;
+        let start_y = 120;
+        let points = averaged
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let x = start_x + i as i32;
+                let y = start_y - v as i32;
+                Point::new(x, y)
+            })
+            .collect::<Vec<Point>>();
+
+        Polyline::new(&points).into_styled(line_style).draw(self)?;
+
+        Ok(())
+    }
+    pub fn new_total(&mut self, house: &str, solar: &str) -> anyhow::Result<()> {
+        let desc_text_style = MonoTextStyleBuilder::new()
+            .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
+            .text_color(BinaryColor::On)
+            .build();
+
+        embedded_graphics::primitives::Rectangle::new(Point::new(100, 91), Size::new(45, 38))
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(self)?;
+        self.fill_solid(
+            &Rectangle::new(Point::new(113, 88), Size::new(20, 7)),
+            BinaryColor::Off,
+        )?;
+
+        Text::new("Total", Point::new(114, 93), desc_text_style).draw(self)?;
+        SUN_PATTERN
+            .iter()
+            .enumerate()
+            .map(|(idx, num)| {
+                let x = 102 + (idx % 18);
+                let y = 95 + (idx / 18);
+                let color = {
+                    if num == &0 {
+                        BinaryColor::Off
+                    } else if num == &1 {
+                        BinaryColor::On
+                    } else {
+                        BinaryColor::Off
+                    }
+                };
+                Pixel(Point::new(x as i32, y as i32), color)
+            })
+            .draw(self)?;
+
+        if solar.len() > 3 {
+            Text::new(solar, Point::new(122, 104), desc_text_style).draw(self)?;
+        } else {
+            Text::new(solar, Point::new(125, 104), desc_text_style).draw(self)?;
+        }
+        HOUSE_PATTERN
+            .iter()
+            .enumerate()
+            .map(|(idx, num)| {
+                let x = 102 + (idx % 18);
+                let y = 112 + (idx / 18);
+                let color = {
+                    if num == &0 {
+                        BinaryColor::Off
+                    } else if num == &1 {
+                        BinaryColor::On
+                    } else {
+                        BinaryColor::Off
+                    }
+                };
+                Pixel(Point::new(x as i32, y as i32), color)
+            })
+            .draw(self)?;
+
+        if house.len() > 3 {
+            Text::new(house, Point::new(122, 121), desc_text_style).draw(self)?;
+        } else {
+            Text::new(house, Point::new(125, 121), desc_text_style).draw(self)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn update_total_new(&mut self, house: &str, solar: &str) -> anyhow::Result<()> {
+        self.fill_solid(
+            &Rectangle::new(Point::new(120, 97), Size::new(23, 30)),
+            BinaryColor::Off,
+        )?;
+        let desc_text_style = MonoTextStyleBuilder::new()
+            .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
+            .text_color(BinaryColor::On)
+            .build();
+        if solar.len() > 3 {
+            Text::new(solar, Point::new(122, 104), desc_text_style).draw(self)?;
+        } else {
+            Text::new(solar, Point::new(125, 104), desc_text_style).draw(self)?;
+        }
+        if house.len() > 3 {
+            Text::new(house, Point::new(122, 121), desc_text_style).draw(self)?;
+        } else {
+            Text::new(house, Point::new(125, 121), desc_text_style).draw(self)?;
+        }
+        Ok(())
+    }
     pub fn draw_default_display<'a>(
         &mut self,
         style: MonoTextStyle<'a, BinaryColor>,
@@ -501,7 +667,7 @@ impl DisplayBoxed {
         .draw(self)?;
         self.draw_text(style, "0.00", "-0.00", "0.00", "-0.00", "0:00PM")?;
         self.draw_default_weather()?;
-        self.draw_default_total()?;
+        self.new_total("00.00", "00.00")?;
         Ok(())
     }
     pub fn draw_text<'a>(
@@ -1323,6 +1489,19 @@ impl DisplayBoxed {
 
         Text::new(generated, Point::new(205, 100), style).draw(self)?;
         Text::new(consumption, Point::new(205, 120), style).draw(self)?;
+        Ok(())
+    }
+    pub fn update_chart(&mut self, data: &[f32]) -> anyhow::Result<()> {
+        self.fill_solid(
+            &Rectangle::new(Point::new(142, 76), Size::new(30, 5)),
+            BinaryColor::Off,
+        )?;
+        self.fill_solid(
+            &Rectangle::new(Point::new(151, 75), Size::new(146, 47)),
+            BinaryColor::Off,
+        )?;
+        self.draw_chart(data)?;
+
         Ok(())
     }
 }

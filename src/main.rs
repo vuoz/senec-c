@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         .build();
 
     let mut retries = 0;
-    loop {
+    'outer: loop {
         log::info!("Retry: {}", retries);
         if retries > 5 {
             break;
@@ -102,7 +102,8 @@ fn main() -> anyhow::Result<()> {
         let mut curr_time = std::time::SystemTime::now();
 
         // we store the prediction results buffer and preallocate
-        let mut rescaled = (0..288).into_iter().map(|_| 0.0).collect::<Vec<f32>>();
+        //let mut rescaled = (0..288).into_iter().map(|_| 0.0).collect::<Vec<f32>>();
+        let mut rescaled = [0.0; 288];
 
         // we make sure that we repaint fully, if it has been fully flushed
         let mut flushed = true;
@@ -110,6 +111,9 @@ fn main() -> anyhow::Result<()> {
         // if there was an error before we need to repaint the default display
         let mut prev_error = false;
         'inner: loop {
+            if retries > 5 {
+                break 'outer;
+            }
             match socket.read() {
                 Ok(message) => match message {
                     tungstenite::Message::Text(t) => {
@@ -230,35 +234,35 @@ fn main() -> anyhow::Result<()> {
                                             display::ConnectionDirection::Left(false),
                                         )?;
                                     }
-
+                                    if let Some(weather) = data.weather {
+                                        if let Some(daily) = weather.daily {
+                                            let sunrise = daily
+                                                .sunrise
+                                                .first()
+                                                .ok_or(anyhow!("missing sunrise values"))?;
+                                            let sunset = daily
+                                                .sunset
+                                                .first()
+                                                .ok_or(anyhow!("missing sunset values"))?;
+                                            display.update_sun_data(sunrise, sunset)?;
+                                        }
+                                        if let Some(hourly) = weather.hourly {
+                                            display.update_weather_data(hourly)?;
+                                        }
+                                    }
                                     if let Some(total_data) = data.total_data {
                                         if total_data.new || flushed {
-                                            display.update_total_display(
+                                            display.update_total_new(
                                                 &total_data.consumption,
                                                 &total_data.generated,
                                             )?;
-                                            // this only needs to be updated every hour
-                                            if let Some(weather) = data.weather {
-                                                if let Some(daily) = weather.daily {
-                                                    let sunrise = daily
-                                                        .sunrise
-                                                        .first()
-                                                        .ok_or(anyhow!("missing sunrise values"))?;
-                                                    let sunset = daily
-                                                        .sunset
-                                                        .first()
-                                                        .ok_or(anyhow!("missing sunset values"))?;
-                                                    display.update_sun_data(sunrise, sunset)?;
-                                                }
-                                                if let Some(hourly) = weather.hourly {
-                                                    display.update_weather_data(hourly)?;
-                                                }
-                                            }
-
-                                            flushed = false;
                                         }
                                     }
+                                    if flushed {
+                                        display.update_chart(&rescaled)?;
+                                    }
 
+                                    flushed = false;
                                     epd.update_new_frame(
                                         &mut driver,
                                         display.buffer(),
@@ -276,7 +280,6 @@ fn main() -> anyhow::Result<()> {
                                 }
                                 Some(prototypes::types::data::Oneof::Prediction(prediction)) => {
                                     println!("got prediction: {:?}", prediction);
-                                    println!("got prediction {:?}", prediction);
                                     if prediction.prediction.len() != 288 {
                                         continue;
                                     }
@@ -286,6 +289,7 @@ fn main() -> anyhow::Result<()> {
                                     for (i, v) in prediction.prediction.iter().enumerate() {
                                         rescaled[i] = *v as f32 / 1000.0;
                                     }
+                                    display.update_chart(&rescaled)?;
                                     continue;
                                 }
                                 None => {
@@ -311,7 +315,8 @@ fn main() -> anyhow::Result<()> {
                 },
                 Err(e) => {
                     println!("error reading from ws: {:?}", e);
-                    continue;
+                    retries += 1;
+                    break 'inner;
                 }
             }
         }
