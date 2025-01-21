@@ -290,6 +290,12 @@ fn main() -> anyhow::Result<()> {
                                         rescaled[i] = *v as f32 / 1000.0;
                                     }
                                     display.update_chart(&rescaled)?;
+                                    epd.update_new_frame(
+                                        &mut driver,
+                                        display.buffer(),
+                                        &mut delay::Ets,
+                                    )?;
+                                    epd.display_new_frame(&mut driver, &mut delay::Ets)?;
                                     continue;
                                 }
                                 None => {
