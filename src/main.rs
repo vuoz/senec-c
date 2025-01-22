@@ -13,10 +13,15 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
 use embedded_graphics::text::{Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
+use embedded_websocket::framer::{Framer, ReadResult};
+use embedded_websocket::WebSocketClient;
+use embedded_websocket::WebSocketOptions;
 use epd_waveshare::prelude::WaveshareDisplay;
 use epd_waveshare::prelude::*;
 use esp_idf_hal::delay;
 use prost::Message;
+use rand::rngs::ThreadRng;
+use std::net::TcpStream;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -24,6 +29,21 @@ use esp_idf_hal::peripherals::Peripherals;
 
 use crate::display::init_display;
 use crate::wifi::connect_to_wifi;
+// helper to construct the options
+pub fn create_tcp_conn_and_client(
+    addr: &str,
+) -> anyhow::Result<(TcpStream, WebSocketOptions, WebSocketClient<ThreadRng>)> {
+    let stream = TcpStream::connect(addr)?;
+    let client = WebSocketClient::new_client(rand::thread_rng());
+    let websocket_options = WebSocketOptions {
+        path: "/subscribe",
+        host: "",
+        origin: "",
+        sub_protocols: None,
+        additional_headers: None,
+    };
+    return Ok((stream, websocket_options, client));
+}
 
 fn main() -> anyhow::Result<()> {
     let wifi_password = option_env!("WIFI_PASS").ok_or(anyhow!("wifi_pass not set"))?;
@@ -85,13 +105,21 @@ fn main() -> anyhow::Result<()> {
         epd.update_and_display_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
         epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
 
-        let (mut socket, response) =
-            tungstenite::connect(format!("ws://{}/subscribe", server_addr))?;
-        if response.status() != tungstenite::http::StatusCode::SWITCHING_PROTOCOLS {
-            log::info!("Error: {:?}", response.status());
-            retries += 1;
-            continue;
-        }
+        let mut read_cursor = 0;
+        let mut write_buf = [0; 500];
+        let mut read_buf = [0; 500];
+        let mut frame_buf = [0; 2000];
+
+        let (mut stream, options, mut client) = create_tcp_conn_and_client(&server_addr)?;
+        let mut framer = Framer::new(&mut read_buf, &mut read_cursor, &mut write_buf, &mut client);
+
+        match framer.connect(&mut stream, &options) {
+            Ok(_) => (),
+            Err(e) => {
+                log::info!("Error: {:?}", e);
+                continue;
+            }
+        };
         log::info!("Connected to websocket");
         display.set_connected()?;
         epd.update_new_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
@@ -102,7 +130,6 @@ fn main() -> anyhow::Result<()> {
         let mut curr_time = std::time::SystemTime::now();
 
         // we store the prediction results buffer and preallocate
-        //let mut rescaled = (0..288).into_iter().map(|_| 0.0).collect::<Vec<f32>>();
         let mut rescaled = [0.0; 288];
 
         // we make sure that we repaint fully, if it has been fully flushed
@@ -114,13 +141,17 @@ fn main() -> anyhow::Result<()> {
             if retries > 5 {
                 break 'outer;
             }
-            match socket.read() {
-                Ok(message) => match message {
-                    tungstenite::Message::Text(t) => {
-                        println!("got a text message: {:?}", t);
-                        continue;
+            match framer.read(&mut stream, &mut frame_buf) {
+                Ok(v) => match v {
+                    ReadResult::Text(t) => {
+                        println!("got text reas: {:?}", t);
+                        continue 'inner;
                     }
-                    tungstenite::Message::Binary(b) => {
+                    ReadResult::Pong(p) => {
+                        println!("got pong {:?}", p);
+                        continue 'inner;
+                    }
+                    ReadResult::Binary(b) => {
                         match prototypes::types::Data::decode(b) {
                             Ok(data_enum) => match data_enum.oneof {
                                 Some(prototypes::types::data::Oneof::UiData(data)) => {
@@ -143,6 +174,7 @@ fn main() -> anyhow::Result<()> {
                                                 &mut delay::Ets,
                                             )?;
                                         } else {
+                                            // else we just paint the prev buffer
                                             epd.update_and_display_frame(
                                                 &mut driver,
                                                 prev_buffer.as_slice(),
@@ -307,22 +339,14 @@ fn main() -> anyhow::Result<()> {
                                 continue;
                             }
                         };
-
-                        println!("error parsing the message");
                     }
-                    tungstenite::Message::Close(v) => {
-                        println!("connection was closed: {:?}", v);
+                    ReadResult::Closed => {
+                        println!("connection was closed");
                         break 'inner;
-                    }
-                    v => {
-                        println!("unexpected message: {:?}", v);
-                        continue;
                     }
                 },
                 Err(e) => {
-                    println!("error reading from ws: {:?}", e);
-                    retries += 1;
-                    break 'inner;
+                    println!("error reading from framer: {:?}", e)
                 }
             }
         }
