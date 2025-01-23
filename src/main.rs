@@ -102,7 +102,6 @@ fn main() -> anyhow::Result<()> {
         let mut curr_time = std::time::SystemTime::now();
 
         // we store the prediction results buffer and preallocate
-        //let mut rescaled = (0..288).into_iter().map(|_| 0.0).collect::<Vec<f32>>();
         let mut rescaled = [0.0; 288];
 
         // we make sure that we repaint fully, if it has been fully flushed
@@ -114,6 +113,26 @@ fn main() -> anyhow::Result<()> {
             if retries > 5 {
                 break 'outer;
             }
+            // storing this here is cheaper than getting everything new over the "wire"
+            struct PrevText {
+                house_pow: String,
+                bat_charge: String,
+                inverter_pow: String,
+                grid_pow: String,
+                ts: String,
+            }
+            impl Default for PrevText {
+                fn default() -> Self {
+                    PrevText {
+                        house_pow: "0.00".to_string(),
+                        bat_charge: "0.00".to_string(),
+                        inverter_pow: "0.00".to_string(),
+                        grid_pow: "0.00".to_string(),
+                        ts: "".to_string(),
+                    }
+                }
+            }
+            let mut prevs = PrevText::default();
             match socket.read() {
                 Ok(message) => match message {
                     tungstenite::Message::Text(t) => {
@@ -160,25 +179,67 @@ fn main() -> anyhow::Result<()> {
                                     }
 
                                     display.clear_text()?;
+
+                                    // very verbose incoming
+                                    // we could solve this by creating more granular drawing
+                                    // functionality, so we only have to draw the smallest parts
+                                    // that change, but this will be extremely verbose and might
+                                    // not really matter performance wise
+
+                                    let house_pow = match &data.gui_house_pow {
+                                        Some(v) => {
+                                            prevs.house_pow = v.clone();
+                                            v
+                                        }
+                                        None => &prevs.house_pow,
+                                    };
+                                    let bat_charge = match &data.gui_bat_data_fuel_charge {
+                                        Some(v) => {
+                                            prevs.bat_charge = v.clone();
+                                            v
+                                        }
+                                        None => &prevs.bat_charge,
+                                    };
+                                    let inverter_pow = match &data.gui_inverter_power {
+                                        Some(v) => {
+                                            prevs.inverter_pow = v.clone();
+                                            v
+                                        }
+                                        None => &prevs.inverter_pow,
+                                    };
+                                    let grid_pow = match &data.gui_grid_pow {
+                                        Some(v) => {
+                                            prevs.grid_pow = v.clone();
+                                            v
+                                        }
+                                        None => &prevs.grid_pow,
+                                    };
+                                    let ts = match &data.ts {
+                                        Some(v) => {
+                                            prevs.ts = v.clone();
+                                            v
+                                        }
+                                        None => &prevs.ts,
+                                    };
                                     display.draw_text(
                                         default_text_style,
-                                        &data.gui_house_pow,
-                                        &match data.gui_bat_data_power.contains("-") {
+                                        &house_pow,
+                                        &match bat_charge.starts_with("-") {
                                             // meaning the battery is being charged
                                             false => {
-                                                format!("+{}", data.gui_bat_data_fuel_charge)
+                                                format!("+{}", bat_charge)
                                             }
                                             // meaning battery is being discharged
                                             true => {
-                                                format!("-{}", data.gui_bat_data_fuel_charge)
+                                                format!("-{}", bat_charge)
                                             }
                                         },
-                                        &data.gui_inverter_power,
-                                        &match data.gui_grid_pow.starts_with("-") {
-                                            true => format!("{}", data.gui_grid_pow),
-                                            false => format!("+{}", data.gui_grid_pow),
+                                        &inverter_pow,
+                                        &match grid_pow.starts_with("-") {
+                                            true => format!("{}", grid_pow),
+                                            false => format!("+{}", grid_pow),
                                         },
-                                        &data.ts,
+                                        &ts,
                                     )?;
 
                                     // to the house always active
@@ -188,51 +249,47 @@ fn main() -> anyhow::Result<()> {
 
                                     // will rework the conditions in the future
 
-                                    if data.gui_bat_data_power != "0.00"
-                                        && !data.gui_bat_data_power.starts_with("-")
-                                    {
-                                        // to the battery since it is being discharged
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Bottom(false),
-                                        )?;
+                                    if let Some(info) = &data.gui_bat_data_power {
+                                        if info != "0.00" && !info.starts_with("-") {
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Bottom(true),
+                                            )?;
+                                        }
                                     }
-                                    if data.gui_bat_data_power.starts_with("-")
-                                        && data.gui_bat_data_power != "0.00"
-                                    {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Bottom(false),
-                                        )?
-                                    } else if !data.gui_bat_data_power.starts_with("-")
-                                        && data.gui_bat_data_power != "0.00"
-                                    {
-                                        // to the battery since it is being charged
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Bottom(true),
-                                        )?;
+
+                                    if let Some(battery) = &data.gui_bat_data_power {
+                                        if battery.starts_with("-") && battery != "-0.00" {
+                                            // battery is being discharged
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Bottom(false),
+                                            )?;
+                                        } else if !battery.starts_with("-") && battery != "0.00" {
+                                            // battery is being charged
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Bottom(true),
+                                            )?;
+                                        }
                                     }
 
                                     // power send to the grid
-                                    if data.gui_grid_pow.starts_with("-")
-                                        && data.gui_grid_pow != "-0.00"
-                                    {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Right(true),
-                                        )?;
-                                    } else if !data.gui_grid_pow.starts_with("-")
-                                        && data.gui_grid_pow != "0.00"
-                                    {
-                                        // power taken from the grid
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Right(false),
-                                        )?;
+                                    if let Some(grid) = data.gui_grid_pow {
+                                        if grid.starts_with("-") && grid != "-0.00" {
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Right(true),
+                                            )?;
+                                        } else if grid.starts_with("-") && grid != "0.00" {
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Right(false),
+                                            )?;
+                                        }
                                     }
 
-                                    if data.gui_inverter_power != "0.00"
-                                        && !data.gui_inverter_power.starts_with("-")
-                                    {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Left(false),
-                                        )?;
+                                    if let Some(inverter) = data.gui_inverter_power {
+                                        if inverter != "0.00" && !inverter.starts_with("-") {
+                                            display.draw_connections(
+                                                display::ConnectionDirection::Left(false),
+                                            )?;
+                                        }
                                     }
                                     if let Some(weather) = data.weather {
                                         if let Some(daily) = weather.daily {

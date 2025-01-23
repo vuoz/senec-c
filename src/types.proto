@@ -11,17 +11,17 @@ message data{
     }
 }
 message NewUiStruct {
-  string ts = 1;
-  string stat_state = 2;
-  string gui_bat_data_power = 3;
-  string gui_inverter_power = 4;
-  string gui_house_pow = 5;
-  string gui_grid_pow = 6;
-  string gui_bat_data_fuel_charge = 7;
-  string gui_charging_info = 8;
-  string gui_boosting_info = 9;
-  WeatherNew weather = 10;
-  TotalDataNew total_data = 11;
+  optional string ts = 1;
+  optional string stat_state = 2;
+  optional string gui_bat_data_power = 3;
+  optional string gui_inverter_power = 4;
+  optional string gui_house_pow = 5;
+  optional string gui_grid_pow = 6;
+  optional string gui_bat_data_fuel_charge = 7;
+  optional string gui_charging_info = 8;
+  optional string gui_boosting_info = 9;
+  optional WeatherNew weather = 10;
+  optional TotalDataNew total_data = 11;
 }
 
 message TotalDataNew {
