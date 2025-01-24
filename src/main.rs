@@ -8,9 +8,12 @@ pub mod prototypes {
         include!(concat!(env!("OUT_DIR"), "/prototypes.types.rs"));
     }
 }
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
+use embedded_graphics::prelude::Size;
+use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::text::{Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
 use epd_waveshare::prelude::WaveshareDisplay;
@@ -24,6 +27,32 @@ use esp_idf_hal::peripherals::Peripherals;
 
 use crate::display::init_display;
 use crate::wifi::connect_to_wifi;
+
+#[derive(Debug)]
+struct PrevText {
+    house_pow: String,
+    bat_charge: String,
+    inverter_pow: String,
+    grid_pow: String,
+    ts: String,
+}
+impl Default for PrevText {
+    fn default() -> Self {
+        PrevText {
+            house_pow: "0.00".to_string(),
+            bat_charge: "0.00".to_string(),
+            inverter_pow: "0.00".to_string(),
+            grid_pow: "0.00".to_string(),
+            ts: "0:00".to_string(),
+        }
+    }
+}
+#[derive(Debug)]
+struct PrevConnections {
+    battery: String,
+    grid: String,
+    sun_inverter: String,
+}
 
 fn main() -> anyhow::Result<()> {
     let wifi_password = option_env!("WIFI_PASS").ok_or(anyhow!("wifi_pass not set"))?;
@@ -109,30 +138,18 @@ fn main() -> anyhow::Result<()> {
 
         // if there was an error before we need to repaint the default display
         let mut prev_error = false;
+
+        let mut prevs = PrevText::default();
+        let mut prev_connections = PrevConnections {
+            battery: "0.00".to_string(),
+            grid: "0.00".to_string(),
+            sun_inverter: "0.00".to_string(),
+        };
         'inner: loop {
             if retries > 5 {
                 break 'outer;
             }
-            // storing this here is cheaper than getting everything new over the "wire"
-            struct PrevText {
-                house_pow: String,
-                bat_charge: String,
-                inverter_pow: String,
-                grid_pow: String,
-                ts: String,
-            }
-            impl Default for PrevText {
-                fn default() -> Self {
-                    PrevText {
-                        house_pow: "0.00".to_string(),
-                        bat_charge: "0.00".to_string(),
-                        inverter_pow: "0.00".to_string(),
-                        grid_pow: "0.00".to_string(),
-                        ts: "".to_string(),
-                    }
-                }
-            }
-            let mut prevs = PrevText::default();
+
             match socket.read() {
                 Ok(message) => match message {
                     tungstenite::Message::Text(t) => {
@@ -156,6 +173,7 @@ fn main() -> anyhow::Result<()> {
                                         // in the case that the screen was an error screen before we need to
                                         // repaint the default display
                                         if prev_error {
+                                            println!("repainting default display");
                                             epd.update_and_display_frame(
                                                 &mut driver,
                                                 display.buffer(),
@@ -221,18 +239,28 @@ fn main() -> anyhow::Result<()> {
                                         }
                                         None => &prevs.ts,
                                     };
+                                    let bat_power = match &data.gui_bat_data_power {
+                                        Some(v) => {
+                                            prev_connections.battery = v.clone();
+                                            v
+                                        }
+                                        None => prev_connections.battery.as_str(),
+                                    };
                                     display.draw_text(
                                         default_text_style,
                                         &house_pow,
-                                        &match bat_charge.starts_with("-") {
-                                            // meaning the battery is being charged
-                                            false => {
-                                                format!("+{}", bat_charge)
-                                            }
-                                            // meaning battery is being discharged
-                                            true => {
-                                                format!("-{}", bat_charge)
-                                            }
+                                        &if bat_power != "0.00" && !bat_power.starts_with("-") {
+                                            // bat_power is the current going to the battery,
+                                            // therefore if non 0 and not starting with a minus we
+                                            // are charging
+                                            format!("+{}", bat_charge)
+                                        } else if bat_power.starts_with("-") && bat_power != "-0.00"
+                                        {
+                                            // in this case we are discharging
+                                            format!("-{}", bat_charge)
+                                        } else {
+                                            // no current flowing in or out of the battery
+                                            format!("{}", bat_charge)
                                         },
                                         &inverter_pow,
                                         &match grid_pow.starts_with("-") {
@@ -242,55 +270,67 @@ fn main() -> anyhow::Result<()> {
                                         &ts,
                                     )?;
 
+                                    // clearing the connections
+                                    display.fill_solid(
+                                        &Rectangle::new(Point::new(54, 43), Size::new(42, 41)),
+                                        BinaryColor::Off,
+                                    )?;
                                     // to the house always active
                                     display.draw_connections(display::ConnectionDirection::Top(
                                         true,
                                     ))?;
 
-                                    // will rework the conditions in the future
+                                    // we could also just check for changes and clear the arrows
+                                    // individually to avoid this copying and redrawing
+                                    // will do that in the future
 
-                                    if let Some(info) = &data.gui_bat_data_power {
-                                        if info != "0.00" && !info.starts_with("-") {
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Bottom(true),
-                                            )?;
+                                    let grid = match &data.gui_grid_pow {
+                                        Some(v) => {
+                                            prev_connections.grid = v.clone();
+                                            v
                                         }
+                                        None => &prev_connections.grid,
+                                    };
+                                    let sun_inverter = match &data.gui_inverter_power {
+                                        Some(v) => {
+                                            prev_connections.sun_inverter = v.clone();
+                                            v
+                                        }
+                                        None => &prev_connections.sun_inverter,
+                                    };
+
+                                    if bat_power != "0.00" && !bat_power.starts_with("-") {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Bottom(true),
+                                        )?;
+                                    } else if bat_power != "0.00" && bat_power.starts_with("-") {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Bottom(false),
+                                        )?;
                                     }
 
-                                    if let Some(battery) = &data.gui_bat_data_power {
-                                        if battery.starts_with("-") && battery != "-0.00" {
-                                            // battery is being discharged
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Bottom(false),
-                                            )?;
-                                        } else if !battery.starts_with("-") && battery != "0.00" {
-                                            // battery is being charged
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Bottom(true),
-                                            )?;
-                                        }
+                                    if grid != "0.00" && !grid.starts_with("-") {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Right(false),
+                                        )?;
+                                    } else if grid != "0.00" && grid.starts_with("-") {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Right(true),
+                                        )?;
                                     }
 
-                                    // power send to the grid
-                                    if let Some(grid) = data.gui_grid_pow {
-                                        if grid.starts_with("-") && grid != "-0.00" {
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Right(true),
-                                            )?;
-                                        } else if grid.starts_with("-") && grid != "0.00" {
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Right(false),
-                                            )?;
-                                        }
+                                    if sun_inverter != "0.00" && !sun_inverter.starts_with("-") {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Left(false),
+                                        )?;
+                                    } else if sun_inverter != "-0.00"
+                                        && sun_inverter.starts_with("-")
+                                    {
+                                        display.draw_connections(
+                                            display::ConnectionDirection::Left(false),
+                                        )?;
                                     }
 
-                                    if let Some(inverter) = data.gui_inverter_power {
-                                        if inverter != "0.00" && !inverter.starts_with("-") {
-                                            display.draw_connections(
-                                                display::ConnectionDirection::Left(false),
-                                            )?;
-                                        }
-                                    }
                                     if let Some(weather) = data.weather {
                                         if let Some(daily) = weather.daily {
                                             let sunrise = daily
@@ -360,6 +400,7 @@ fn main() -> anyhow::Result<()> {
                                 }
                             },
                             Err(e) => {
+                                prev_error = true;
                                 println!("error decoding data: {:?}", e);
                                 continue;
                             }
