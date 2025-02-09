@@ -145,6 +145,8 @@ fn main() -> anyhow::Result<()> {
             grid: "0.00".to_string(),
             sun_inverter: "0.00".to_string(),
         };
+
+        let mut repaints = 0;
         'inner: loop {
             if retries > 5 {
                 break 'outer;
@@ -166,10 +168,25 @@ fn main() -> anyhow::Result<()> {
                                     // every 2 mins we do a full repaint, refresh of the display to clean up
                                     // small imperfections in the pixles that occur due to quick refreshes
                                     if since > Duration::from_secs(120) {
+                                        // the issue with disapperaing weather information was:
+                                        // the displays buffer is cleared( which
+                                        // contains the weather information and then the prev
+                                        // buffer is painted ) but when the next repaint comes
+                                        // around the prev buffer no longer contains the weather
+                                        // information so we lose that information
+                                        println!("full repaint {}", repaints);
+                                        // we have to copy the displays buffer to be able to
+                                        // repaint the same display after a full fresh up
                                         let last_buff = display.buffer();
                                         let prev_buffer = last_buff.to_vec();
+
+                                        //then we clear the displys buffer + paint the default
+                                        //structures
                                         display.clear_buffer(Color::White);
                                         display.draw_default_display(default_text_style)?;
+
+                                        // now we reset the old buffer
+                                        display.set_buf(&prev_buffer)?;
                                         // in the case that the screen was an error screen before we need to
                                         // repaint the default display
                                         if prev_error {
@@ -186,6 +203,8 @@ fn main() -> anyhow::Result<()> {
                                                 &mut delay::Ets,
                                             )?;
                                         }
+
+                                        repaints += 1;
 
                                         epd.update_old_frame(
                                             &mut driver,

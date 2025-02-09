@@ -116,6 +116,13 @@ impl OriginDimensions for DisplayBoxed {
         self.0.size()
     }
 }
+impl DisplayBoxed {
+    pub fn set_buf(&mut self, new_buf: &[u8]) -> anyhow::Result<()> {
+        let buf = self.0.get_mut_buffer();
+        buf.copy_from_slice(&new_buf);
+        Ok(())
+    }
+}
 
 pub fn init_display<'a>(
     spi2: SPI2,
