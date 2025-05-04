@@ -1,19 +1,23 @@
-use crate::prototypes::types::HourlyNew;
+use std::convert::Infallible;
+
+use crate::prototypes::types::*;
 use anyhow::anyhow;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::iterator::PixelIteratorExt;
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
-use embedded_graphics::pixelcolor::BinaryColor;
+use embedded_graphics::prelude::Dimensions;
 use embedded_graphics::prelude::OriginDimensions;
+use embedded_graphics::prelude::PixelColor;
 use embedded_graphics::prelude::Point;
 use embedded_graphics::prelude::Size;
 use embedded_graphics::primitives::*;
 use embedded_graphics::text::Text;
 use embedded_graphics::Drawable;
 use embedded_graphics::Pixel;
+use embedded_graphics_simulator::SimulatorDisplay;
+use epd_waveshare::color::Color;
 use epd_waveshare::epd2in9_v2::Epd2in9;
-use epd_waveshare::prelude::Display;
 use epd_waveshare::prelude::DisplayRotation;
 use epd_waveshare::{prelude::WaveshareDisplay, *};
 use esp_idf_hal::delay;
@@ -34,6 +38,10 @@ use esp_idf_hal::spi::SpiDriver;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::units::Hertz;
 
+
+
+
+
 // this is for the direction power is comming from
 enum ArrowDirection {
     Left,
@@ -52,11 +60,84 @@ pub enum ConnectionDirection {
     Left(bool),
     Bottom(bool),
 }
-// trying to avoid stack overflows so we use heap alloc
-pub struct DisplayBoxed(Box<epd2in9_v2::Display2in9>);
 
-impl DrawTarget for DisplayBoxed {
-    type Color = BinaryColor;
+pub struct DisplayBoxed<T: Dimensions + DrawTarget>(pub Box<T>);
+
+
+// this is some code for the simulator display that is located in bin/simulator.rs
+impl DisplayBoxed<SimulatorDisplay<Color>> {
+    pub fn inner_simulator_display(&self)-> &SimulatorDisplay<Color>{
+        &self.0
+    }
+
+}
+
+// pass through the functions for the display. in the recent version of epd-waveshare the
+// display trait seems to have been removed
+// it no longer seems possible to edit/ modify the displays internal buffer
+impl DisplayBoxed<epd2in9_v2::Display2in9> {
+    pub fn buffer(&self) -> &[u8] {
+        self.0.buffer()
+    }
+    pub fn set_rotation(&mut self, rotation: DisplayRotation) {
+        self.0.set_rotation(rotation);
+    }
+    // since we no longer have access to the display buffer we need to to modify it indirectly
+    // through the drawing apis
+    pub fn set_buf(&mut self, buf: &[u8]) -> Result<(),Infallible>{
+        let size = self.size();
+        buf.iter().enumerate().map(|(i,byte)| {
+            match byte{
+                1=>{
+                    let y =  i / (size.width) as usize;
+                    let x = i % (size.width) as usize;
+
+                    Pixel(
+                        Point::new(
+                            x as i32,
+                            y as i32,
+                        ),
+                        epd_waveshare::color::Color::Black,
+                    )
+
+                },
+                0=>{
+
+                    let y =  i / (size.width) as usize;
+                    let x = i % (size.width) as usize;
+
+
+                    Pixel(
+                        Point::new(
+                            x as i32,y as i32
+                        ),
+                        epd_waveshare::color::Color::White,
+                    )
+
+                }
+                _=>{
+                    unreachable!("this should never happen")
+                }
+
+
+            }
+            
+            
+        }).draw(self)?;
+
+        Ok(())
+    }
+
+}
+
+
+impl<T> DrawTarget for DisplayBoxed<T>
+where
+    T: Dimensions,
+    T: embedded_graphics::draw_target::DrawTarget<Error = Infallible,Color =epd_waveshare::color::Color>,
+    T: embedded_graphics::geometry::OriginDimensions,
+{
+    type Color = epd_waveshare::color::Color;
     type Error = core::convert::Infallible;
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.0.clear(color)
@@ -85,45 +166,17 @@ impl DrawTarget for DisplayBoxed {
         self.0.fill_contiguous(area, colors)
     }
 }
-impl Display for DisplayBoxed {
-    fn buffer(&self) -> &[u8] {
-        self.0.buffer()
-    }
-    fn rotation(&self) -> DisplayRotation {
-        self.0.rotation()
-    }
-    fn draw_helper(
-        &mut self,
-        width: u32,
-        height: u32,
-        pixel: embedded_graphics::Pixel<BinaryColor>,
-    ) -> Result<(), Self::Error> {
-        self.0.draw_helper(width, height, pixel)
-    }
-    fn clear_buffer(&mut self, background_color: prelude::Color) {
-        self.0.clear_buffer(background_color)
-    }
-    fn set_rotation(&mut self, rotation: DisplayRotation) {
-        self.0.set_rotation(rotation)
-    }
-    fn get_mut_buffer(&mut self) -> &mut [u8] {
-        self.0.get_mut_buffer()
-    }
-}
 
-impl OriginDimensions for DisplayBoxed {
+// this is some stuff that is neccesary to implement DrawTarget
+impl<T> OriginDimensions for DisplayBoxed<T>
+where
+    T: embedded_graphics::geometry::OriginDimensions,
+    T: DrawTarget<Error = Infallible,Color = epd_waveshare::color::Color>,
+{
     fn size(&self) -> embedded_graphics::prelude::Size {
         self.0.size()
     }
 }
-impl DisplayBoxed {
-    pub fn set_buf(&mut self, new_buf: &[u8]) -> anyhow::Result<()> {
-        let buf = self.0.get_mut_buffer();
-        buf.copy_from_slice(&new_buf);
-        Ok(())
-    }
-}
-
 pub fn init_display<'a>(
     spi2: SPI2,
     gpio48: Gpio48,
@@ -133,10 +186,10 @@ pub fn init_display<'a>(
     gpio18: Gpio18,
     gpio17: Gpio17,
 ) -> anyhow::Result<(
-    DisplayBoxed,
+    DisplayBoxed<epd2in9_v2::Display2in9>,
     Epd2in9<
         SpiDeviceDriver<'a, SpiDriver<'a>>,
-        PinDriver<'a, Gpio21, Output>,
+        //PinDriver<'a, Gpio21, Output>,
         PinDriver<'a, Gpio10, Input>,
         PinDriver<'a, Gpio18, Output>,
         PinDriver<'a, Gpio17, Output>,
@@ -153,8 +206,8 @@ pub fn init_display<'a>(
         &spi::SpiDriverConfig::new().dma(spi::Dma::Disabled),
         &spi::SpiConfig::new().baudrate(Hertz::from(26)),
     )?;
-
-    let cs = gpio::PinDriver::output(gpio21)?;
+    // this seems to no longer be neccesary in epd-waveshare
+    let _cs = gpio::PinDriver::output(gpio21)?;
 
     let busy = gpio::PinDriver::input(gpio10)?;
 
@@ -162,7 +215,7 @@ pub fn init_display<'a>(
 
     let rst = gpio::PinDriver::output(gpio17)?;
 
-    let epd = match epd2in9_v2::Epd2in9::new(&mut driver, cs, busy, dc, rst, &mut delay::Ets) {
+    let epd = match epd2in9_v2::Epd2in9::new(&mut driver, busy, dc, rst, &mut delay::Ets, None) {
         std::result::Result::Ok(epd) => epd,
         Err(e) => return Err(anyhow::Error::new(e)),
     };
@@ -170,8 +223,8 @@ pub fn init_display<'a>(
     let display = Box::new(epd2in9_v2::Display2in9::default());
     let mut dis_boxed = DisplayBoxed { 0: display };
 
-    dis_boxed.set_rotation(DisplayRotation::Rotate90);
-    dis_boxed.clear(BinaryColor::Off)?;
+    dis_boxed.0.set_rotation(DisplayRotation::Rotate90);
+    dis_boxed.clear(epd_waveshare::color::Color::White.into())?;
     return Ok((dis_boxed, epd, driver));
 }
 #[rustfmt::skip]
@@ -310,25 +363,32 @@ fn max_in_slice(slice: &[f32]) -> Option<f32> {
         Some(m) => Some(m.max(x)),
     })
 }
-impl DisplayBoxed {
+
+impl<T> DisplayBoxed<T>
+where
+    T: Dimensions,
+    T: embedded_graphics::draw_target::DrawTarget<Error = Infallible,Color = epd_waveshare::color::Color>,
+    T: embedded_graphics::geometry::OriginDimensions,
+    T::Color:PixelColor,
+{
     pub fn draw_chart(&mut self, data: &[f32]) -> anyhow::Result<()> {
         let desc_text_style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
 
-        let line_style = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+        let line_style = PrimitiveStyle::with_stroke(epd_waveshare::color::Color::Black, 1);
         Line::new(Point::new(153, 124), Point::new(286, 124))
             .into_styled(line_style)
             .draw(self)?;
 
         self.fill_solid(
             &Rectangle::new(Point::new(217, 124), Size::new(9, 8)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(149, 121), Size::new(2, 7)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         Text::new("0", Point::new(149, 126), desc_text_style).draw(self)?;
         Text::new("12", Point::new(218, 126), desc_text_style).draw(self)?;
@@ -337,7 +397,7 @@ impl DisplayBoxed {
         let max = max_in_slice(&data).ok_or(anyhow!("error finding max value"))?;
         self.fill_solid(
             &Rectangle::new(Point::new(145, 75), Size::new(10, 8)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         if max >= 10.0 {
             Text::new(
@@ -386,15 +446,15 @@ impl DisplayBoxed {
     pub fn new_total(&mut self, house: &str, solar: &str) -> anyhow::Result<()> {
         let desc_text_style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
 
         embedded_graphics::primitives::Rectangle::new(Point::new(100, 91), Size::new(45, 38))
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .into_styled(PrimitiveStyle::with_stroke(epd_waveshare::color::Color::Black, 1))
             .draw(self)?;
         self.fill_solid(
             &Rectangle::new(Point::new(113, 88), Size::new(20, 7)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
 
         Text::new("Total", Point::new(114, 93), desc_text_style).draw(self)?;
@@ -406,11 +466,11 @@ impl DisplayBoxed {
                 let y = 95 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -430,11 +490,11 @@ impl DisplayBoxed {
                 let y = 112 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -453,11 +513,11 @@ impl DisplayBoxed {
     pub fn update_total_new(&mut self, house: &str, solar: &str) -> anyhow::Result<()> {
         self.fill_solid(
             &Rectangle::new(Point::new(120, 97), Size::new(23, 30)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         let desc_text_style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         if solar.len() > 3 {
             Text::new(solar, Point::new(122, 104), desc_text_style).draw(self)?;
@@ -473,14 +533,14 @@ impl DisplayBoxed {
     }
     pub fn draw_default_display<'a>(
         &mut self,
-        style: MonoTextStyle<'a, BinaryColor>,
+        style: MonoTextStyle<'a, epd_waveshare::color::Color>,
     ) -> anyhow::Result<()> {
         self.draw_default_battery_percentage()?;
         //Circle top
         Circle::new(Point::new(55, 2), 40)
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -489,7 +549,7 @@ impl DisplayBoxed {
         Circle::new(Point::new(55, 86), 40)
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -500,7 +560,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(2)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -510,26 +570,26 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(2)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
         // Solids for the icons
         self.fill_solid(
             &Rectangle::new(Point::new(66, 0), Size::new(18, 15)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(66, 84), Size::new(18, 15)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(24, 42), Size::new(18, 15)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(108, 42), Size::new(18, 15)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
 
         // icons
@@ -541,11 +601,11 @@ impl DisplayBoxed {
                 let y = 0 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -559,11 +619,11 @@ impl DisplayBoxed {
                 let y = 43 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -577,11 +637,11 @@ impl DisplayBoxed {
                 let y = 84 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -590,7 +650,7 @@ impl DisplayBoxed {
         Line::new(Point::new(66 + 12, 85), Point::new(71, 96))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(1)
                     .build(),
             )
@@ -604,11 +664,11 @@ impl DisplayBoxed {
                 let y = 42 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -617,7 +677,7 @@ impl DisplayBoxed {
         Line::new(Point::new(149, 0), Point::new(149, 128))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -625,7 +685,7 @@ impl DisplayBoxed {
         Line::new(Point::new(103, 0), Point::new(103, 20))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -633,7 +693,7 @@ impl DisplayBoxed {
         Line::new(Point::new(103, 20), Point::new(149, 20))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -644,7 +704,7 @@ impl DisplayBoxed {
             Point::new(71, 120),
             MonoTextStyleBuilder::new()
                 .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
-                .text_color(BinaryColor::On)
+                .text_color(epd_waveshare::color::Color::Black)
                 .build(),
         )
         .draw(self)?;
@@ -656,7 +716,7 @@ impl DisplayBoxed {
                 Point::new(pos.0 + 5, pos.1 + 11),
                 MonoTextStyleBuilder::new()
                     .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-                    .text_color(BinaryColor::On)
+                    .text_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -668,7 +728,7 @@ impl DisplayBoxed {
             Point::new(71, 120),
             MonoTextStyleBuilder::new()
                 .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
-                .text_color(BinaryColor::On)
+                .text_color(epd_waveshare::color::Color::Black)
                 .build(),
         )
         .draw(self)?;
@@ -679,7 +739,7 @@ impl DisplayBoxed {
     }
     pub fn draw_text<'a>(
         &mut self,
-        style: MonoTextStyle<'a, BinaryColor>,
+        style: MonoTextStyle<'a, epd_waveshare::color::Color>,
         circle_top: &'a str,
         circle_bottom: &'a str,
         circle_left: &'a str,
@@ -732,42 +792,42 @@ impl DisplayBoxed {
                 Point::new(65, 15),
                 embedded_graphics::prelude::Size::new(25, 10),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(
                 Point::new(60, 99),
                 embedded_graphics::prelude::Size::new(30, 10),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(
                 Point::new(22, 57),
                 embedded_graphics::prelude::Size::new(25, 10),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(
                 Point::new(102, 57),
                 embedded_graphics::prelude::Size::new(30, 10),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(
                 Point::new(105, 1),
                 embedded_graphics::prelude::Size::new(42, 18),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         return Ok(());
     }
     pub fn display_error_message<'a>(
         &mut self,
         message: &str,
-        style: MonoTextStyle<'a, BinaryColor>,
+        style: MonoTextStyle<'a, epd_waveshare::color::Color>,
     ) -> anyhow::Result<()> {
         Text::new(message, Point::new(58, 100), style).draw(self)?;
         Ok(())
@@ -779,7 +839,7 @@ impl DisplayBoxed {
                 Line::new(Point::new(75, 64), Point::new(75, 44))
                     .into_styled(
                         PrimitiveStyleBuilder::new()
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .stroke_width(2)
                             .build(),
                     )
@@ -796,7 +856,7 @@ impl DisplayBoxed {
                 Line::new(Point::new(74, 63), Point::new(55, 63))
                     .into_styled(
                         PrimitiveStyleBuilder::new()
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .stroke_width(2)
                             .build(),
                     )
@@ -813,7 +873,7 @@ impl DisplayBoxed {
                 Line::new(Point::new(74, 64), Point::new(94, 64))
                     .into_styled(
                         PrimitiveStyleBuilder::new()
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .stroke_width(2)
                             .build(),
                     )
@@ -830,7 +890,7 @@ impl DisplayBoxed {
                 Line::new(Point::new(74, 64), Point::new(74, 82))
                     .into_styled(
                         PrimitiveStyleBuilder::new()
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .stroke_width(2)
                             .build(),
                     )
@@ -852,7 +912,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -860,7 +920,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -869,7 +929,7 @@ impl DisplayBoxed {
             Point::new(2, 125),
             MonoTextStyleBuilder::new()
                 .font(&embedded_graphics::mono_font::ascii::FONT_4X6)
-                .text_color(BinaryColor::On)
+                .text_color(epd_waveshare::color::Color::Black)
                 .build(),
         )
         .draw(self)?;
@@ -883,7 +943,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -891,7 +951,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -903,7 +963,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -911,7 +971,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -923,7 +983,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -931,7 +991,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -943,7 +1003,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -951,7 +1011,7 @@ impl DisplayBoxed {
                     .into_styled(
                         PrimitiveStyleBuilder::new()
                             .stroke_width(1)
-                            .stroke_color(BinaryColor::On)
+                            .stroke_color(epd_waveshare::color::Color::Black)
                             .build(),
                     )
                     .draw(self)?;
@@ -963,7 +1023,7 @@ impl DisplayBoxed {
     pub fn update_battery_percentage(&mut self, percentage: &str) -> anyhow::Result<()> {
         self.fill_solid(
             &Rectangle::new(Point::new(1, 1), Size::new(28, 12)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White.into(),
         )?;
         if percentage.len() > 3 || percentage.len() < 1 {
             return Err(anyhow!("errro input sequence too long"));
@@ -982,7 +1042,7 @@ impl DisplayBoxed {
             Point::new(3 + offset, 10),
             MonoTextStyleBuilder::new()
                 .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-                .text_color(BinaryColor::On)
+                .text_color(epd_waveshare::color::Color::Black)
                 .build(),
         )
         .draw(self)?;
@@ -993,7 +1053,7 @@ impl DisplayBoxed {
         Line::new(Point::new(30, 0), Point::new(30, 15))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -1002,7 +1062,7 @@ impl DisplayBoxed {
         Line::new(Point::new(0, 15), Point::new(30, 15))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -1012,7 +1072,7 @@ impl DisplayBoxed {
             Point::new(3, 10),
             MonoTextStyleBuilder::new()
                 .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-                .text_color(BinaryColor::On)
+                .text_color(epd_waveshare::color::Color::Black)
                 .build(),
         )
         .draw(self)?;
@@ -1021,7 +1081,7 @@ impl DisplayBoxed {
     pub fn update_sun_data(&mut self, sunrise: &str, sunset: &str) -> anyhow::Result<()> {
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         if sunset.len() > 5 || sunrise.len() > 5 {
             return Err(anyhow!("error input sequence to long"));
@@ -1030,11 +1090,11 @@ impl DisplayBoxed {
         // clears both text areas
         self.fill_solid(
             &Rectangle::new(Point::new(190, 3), Size::new(30, 12)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(260, 3), Size::new(30, 12)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
 
         Text::new(sunrise, Point::new(190, 12), style).draw(self)?;
@@ -1049,7 +1109,7 @@ impl DisplayBoxed {
         Line::new(Point::new(149, 70), Point::new(296, 70))
             .into_styled(
                 PrimitiveStyleBuilder::new()
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .stroke_width(2)
                     .build(),
             )
@@ -1062,11 +1122,11 @@ impl DisplayBoxed {
                 let y = 2 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1084,11 +1144,11 @@ impl DisplayBoxed {
                 let y = 2 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1098,7 +1158,7 @@ impl DisplayBoxed {
         self.draw_arrow_simple(SimpleArrowDirection::Down, (248, 3))?;
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
 
         // sunset and sunrise values
@@ -1114,11 +1174,11 @@ impl DisplayBoxed {
                 let y = 15 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1132,11 +1192,11 @@ impl DisplayBoxed {
                 let y = 28 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1151,11 +1211,11 @@ impl DisplayBoxed {
                 let y = 52 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1169,7 +1229,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1178,7 +1238,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1187,7 +1247,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1204,7 +1264,7 @@ impl DisplayBoxed {
     ) -> anyhow::Result<()> {
         let style_2 = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_5X8)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         if rain.len() == 3 {
             Text::new(rain, Point::new(155 + x_offset + 10, 27), style_2).draw(self)?;
@@ -1241,7 +1301,7 @@ impl DisplayBoxed {
         let offsets = &[20, 50, 80, 110];
         self.fill_solid(
             &Rectangle::new(Point::new(172, 18), Size::new(130, 50)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         for (idx, x_offset) in offsets.iter().enumerate() {
             let rain = weather_data
@@ -1269,7 +1329,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1278,7 +1338,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1286,7 +1346,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(1)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1307,7 +1367,7 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black)
                         .build(),
                 )
                 .draw(self)?;
@@ -1318,7 +1378,7 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black)
                         .build(),
                 )
                 .draw(self)?;
@@ -1329,11 +1389,11 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black)
                         .build(),
                 )
                 .draw(self)?;
-                Pixel(Point::new(startpos.0 - 6, startpos.1 + 6), BinaryColor::Off).draw(self)?;
+                Pixel(Point::new(startpos.0 - 6, startpos.1 + 6), epd_waveshare::color::Color::Black).draw(self)?;
             }
             SimpleArrowDirection::Down => {
                 Line::new(
@@ -1343,7 +1403,7 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black)
                         .build(),
                 )
                 .draw(self)?;
@@ -1354,7 +1414,7 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black)
                         .build(),
                 )
                 .draw(self)?;
@@ -1365,13 +1425,14 @@ impl DisplayBoxed {
                 .into_styled(
                     PrimitiveStyleBuilder::new()
                         .stroke_width(2)
-                        .stroke_color(BinaryColor::On)
+                        .stroke_color(epd_waveshare::color::Color::Black
+                            )
                         .build(),
                 )
                 .draw(self)?;
                 Pixel(
                     Point::new(startpos.0 + 7, startpos.1 + 11 - 6),
-                    BinaryColor::Off,
+                    epd_waveshare::color::Color::Black,
                 )
                 .draw(self)?;
             }
@@ -1382,7 +1443,7 @@ impl DisplayBoxed {
     pub fn draw_status_message(&mut self, msg: &str) -> anyhow::Result<()> {
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         Text::new(msg, Point::new(58, 64), style).draw(self)?;
         Ok(())
@@ -1393,18 +1454,18 @@ impl DisplayBoxed {
                 Point::new(58, 50),
                 embedded_graphics::prelude::Size::new(180, 20),
             ),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         Ok(())
     }
-    fn draw_default_total(&mut self) -> anyhow::Result<()> {
+    fn _draw_default_total(&mut self) -> anyhow::Result<()> {
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         let style_total = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_6X12)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
 
         // top right corner display "Total"
@@ -1413,7 +1474,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(2)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1421,7 +1482,7 @@ impl DisplayBoxed {
             .into_styled(
                 PrimitiveStyleBuilder::new()
                     .stroke_width(2)
-                    .stroke_color(BinaryColor::On)
+                    .stroke_color(epd_waveshare::color::Color::Black)
                     .build(),
             )
             .draw(self)?;
@@ -1435,11 +1496,11 @@ impl DisplayBoxed {
                 let y = 90 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1455,11 +1516,11 @@ impl DisplayBoxed {
                 let y = 110 + (idx / 18);
                 let color = {
                     if num == &0 {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::White
                     } else if num == &1 {
-                        BinaryColor::On
+                        epd_waveshare::color::Color::Black
                     } else {
-                        BinaryColor::Off
+                        epd_waveshare::color::Color::Black
                     }
                 };
                 Pixel(Point::new(x as i32, y as i32), color)
@@ -1479,15 +1540,15 @@ impl DisplayBoxed {
         }
         let style = MonoTextStyleBuilder::new()
             .font(&embedded_graphics::mono_font::ascii::FONT_9X15)
-            .text_color(BinaryColor::On)
+            .text_color(epd_waveshare::color::Color::Black)
             .build();
         self.fill_solid(
             &Rectangle::new(Point::new(205, 90), Size::new(45, 12)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(205, 110), Size::new(45, 12)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
 
         Text::new(generated, Point::new(205, 100), style).draw(self)?;
@@ -1497,13 +1558,13 @@ impl DisplayBoxed {
     pub fn update_chart(&mut self, data: &[f32]) -> anyhow::Result<()> {
         self.fill_solid(
             &Rectangle::new(Point::new(142, 76), Size::new(30, 5)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
         self.fill_solid(
             &Rectangle::new(Point::new(151, 75), Size::new(146, 47)),
-            BinaryColor::Off,
+            epd_waveshare::color::Color::White,
         )?;
-        self.draw_chart(data)?;
+       self.draw_chart(data)?;
 
         Ok(())
     }

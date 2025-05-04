@@ -3,6 +3,7 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::wifi::{ClientConfiguration, Configuration, EspWifi};
 
+use anyhow::anyhow;
 use esp_idf_svc::wifi::BlockingWifi;
 pub fn connect_to_wifi<'a>(
     modem: Modem,
@@ -15,11 +16,25 @@ pub fn connect_to_wifi<'a>(
     let esp_wifi = EspWifi::new(modem, esp_sys_loop.clone(), Some(nvs))?;
     let mut blocking_wifi = BlockingWifi::wrap(esp_wifi, esp_sys_loop)?;
     blocking_wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: ssid.into(),
+        ssid: heapless::String::try_from(ssid).map_err(|err| {
+            anyhow!(
+                "issue converting ssid from &str to heapless::String err: {:?}",
+                err
+            )
+        })?,
         bssid: None,
         auth_method: esp_idf_svc::wifi::AuthMethod::WPA2WPA3Personal,
-        password: pass.into(),
+        password: heapless::String::try_from(pass).map_err(|err| {
+            anyhow!(
+                "issue converting pass from &str to heapless::String err:{:?}",
+                err
+            )
+        })?,
         channel: None,
+        pmf_cfg: esp_idf_svc::wifi::PmfConfiguration::NotCapable,
+        scan_method: esp_idf_svc::wifi::ScanMethod::CompleteScan(
+            esp_idf_svc::wifi::ScanSortMethod::Signal,
+        ),
     }))?;
     blocking_wifi.start()?;
     blocking_wifi.connect()?;

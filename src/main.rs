@@ -1,16 +1,9 @@
 pub mod client;
-pub mod display;
 pub mod types;
 pub mod wifi;
-// proto defitions
-pub mod prototypes {
-    pub mod types {
-        include!(concat!(env!("OUT_DIR"), "/prototypes.types.rs"));
-    }
-}
+
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
-use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
 use embedded_graphics::prelude::Size;
 use embedded_graphics::primitives::Rectangle;
@@ -20,12 +13,16 @@ use epd_waveshare::prelude::WaveshareDisplay;
 use epd_waveshare::prelude::*;
 use esp_idf_hal::delay;
 use prost::Message;
+use senec_c::display::init_display;
+use senec_c::display::ConnectionDirection;
+use senec_c::prototypes::types::data::Oneof;
+use senec_c::prototypes::types::Data;
+use senec_c::prototypes::*;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use esp_idf_hal::peripherals::Peripherals;
 
-use crate::display::init_display;
 use crate::wifi::connect_to_wifi;
 
 #[derive(Debug)]
@@ -83,6 +80,14 @@ fn main() -> anyhow::Result<()> {
     epd.update_old_frame(&mut driver, display.buffer(), &mut delay::Ets)?;
 
     let mut _wifi = connect_to_wifi(peripherals.modem, wifi_ssid, wifi_password)?;
+    //
+    // #[cfg(feature = "simulated")]
+    // {
+    //
+    //
+    //     let display = embedded_graphics_simulator::SimulatorDisplay::new(Size::new(200, 200));
+    //     let dis_boxed = display::DisplayBoxed(Box::new(display));
+    // }
 
     // update display
     display.clear_status_message()?;
@@ -92,7 +97,7 @@ fn main() -> anyhow::Result<()> {
 
     let default_text_style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
-        .text_color(BinaryColor::On)
+        .text_color(Color::Black)
         .build();
     let _text_style_baseline = TextStyleBuilder::new()
         .baseline(embedded_graphics::text::Baseline::Top)
@@ -159,9 +164,9 @@ fn main() -> anyhow::Result<()> {
                         continue;
                     }
                     tungstenite::Message::Binary(b) => {
-                        match prototypes::types::Data::decode(b) {
+                        match Data::decode(b) {
                             Ok(data_enum) => match data_enum.oneof {
-                                Some(prototypes::types::data::Oneof::UiData(data)) => {
+                                Some(Oneof::UiData(data)) => {
                                     println!("got ui data: {:?}", data);
                                     let time_now = std::time::SystemTime::now();
                                     let since = time_now.duration_since(curr_time)?;
@@ -182,7 +187,7 @@ fn main() -> anyhow::Result<()> {
 
                                         //then we clear the displys buffer + paint the default
                                         //structures
-                                        display.clear_buffer(Color::White);
+                                        display.clear(Color::White)?;
                                         display.draw_default_display(default_text_style)?;
 
                                         // now we reset the old buffer
@@ -292,12 +297,10 @@ fn main() -> anyhow::Result<()> {
                                     // clearing the connections
                                     display.fill_solid(
                                         &Rectangle::new(Point::new(54, 43), Size::new(42, 41)),
-                                        BinaryColor::Off,
+                                        Color::White,
                                     )?;
                                     // to the house always active
-                                    display.draw_connections(display::ConnectionDirection::Top(
-                                        true,
-                                    ))?;
+                                    display.draw_connections(ConnectionDirection::Top(true))?;
 
                                     // we could also just check for changes and clear the arrows
                                     // individually to avoid this copying and redrawing
@@ -319,35 +322,29 @@ fn main() -> anyhow::Result<()> {
                                     };
 
                                     if bat_power != "0.00" && !bat_power.starts_with("-") {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Bottom(true),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Bottom(true))?;
                                     } else if bat_power != "0.00" && bat_power.starts_with("-") {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Bottom(false),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Bottom(false))?;
                                     }
 
                                     if grid != "0.00" && !grid.starts_with("-") {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Right(false),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Right(false))?;
                                     } else if grid != "0.00" && grid.starts_with("-") {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Right(true),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Right(true))?;
                                     }
 
                                     if sun_inverter != "0.00" && !sun_inverter.starts_with("-") {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Left(false),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Left(false))?;
                                     } else if sun_inverter != "-0.00"
                                         && sun_inverter.starts_with("-")
                                     {
-                                        display.draw_connections(
-                                            display::ConnectionDirection::Left(false),
-                                        )?;
+                                        display
+                                            .draw_connections(ConnectionDirection::Left(false))?;
                                     }
 
                                     if let Some(weather) = data.weather {
@@ -394,7 +391,7 @@ fn main() -> anyhow::Result<()> {
 
                                     continue;
                                 }
-                                Some(prototypes::types::data::Oneof::Prediction(prediction)) => {
+                                Some(Oneof::Prediction(prediction)) => {
                                     println!("got prediction: {:?}", prediction);
                                     if prediction.prediction.len() != 288 {
                                         continue;
@@ -444,7 +441,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         retries += 1;
-        display.clear_buffer(Color::White);
+        display.clear(Color::White)?;
         Text::new(
             &format!("Disconnected from Websocket! Retry: {}", retries),
             Point::new(45, 40),
@@ -456,7 +453,7 @@ fn main() -> anyhow::Result<()> {
         continue;
     }
 
-    display.clear_buffer(Color::White);
+    display.clear(Color::White)?;
     Text::new(
         "Disconnected from Websocket!",
         Point::new(60, 40),
