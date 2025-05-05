@@ -1,6 +1,12 @@
+
+
+pub mod prototypes {
+    pub mod types {
+        include!(concat!(env!("OUT_DIR"), "/prototypes.types.rs"));
+    }
+}
 use std::convert::Infallible;
 
-use crate::prototypes::types::*;
 use anyhow::anyhow;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::iterator::PixelIteratorExt;
@@ -15,29 +21,18 @@ use embedded_graphics::primitives::*;
 use embedded_graphics::text::Text;
 use embedded_graphics::Drawable;
 use embedded_graphics::Pixel;
-use embedded_graphics_simulator::SimulatorDisplay;
-use epd_waveshare::color::Color;
-use epd_waveshare::epd2in9_v2::Epd2in9;
+//use embedded_graphics_simulator::SimulatorDisplay;
 use epd_waveshare::prelude::DisplayRotation;
-use epd_waveshare::{prelude::WaveshareDisplay, *};
-use esp_idf_hal::delay;
-use esp_idf_hal::delay::Ets;
-use esp_idf_hal::gpio;
-use esp_idf_hal::gpio::Gpio10;
-use esp_idf_hal::gpio::Gpio17;
-use esp_idf_hal::gpio::Gpio18;
-use esp_idf_hal::gpio::Gpio21;
-use esp_idf_hal::gpio::Gpio38;
-use esp_idf_hal::gpio::Gpio48;
-use esp_idf_hal::gpio::Input;
-use esp_idf_hal::gpio::Output;
-use esp_idf_hal::gpio::PinDriver;
-use esp_idf_hal::spi;
-use esp_idf_hal::spi::SpiDeviceDriver;
-use esp_idf_hal::spi::SpiDriver;
-use esp_idf_hal::spi::SPI2;
-use esp_idf_hal::units::Hertz;
+use epd_waveshare::*;
 
+//
+// // this is some code for the simulator display that is located in bin/simulator.rs
+// impl DisplayBoxed<SimulatorDisplay<Color>> {
+//     pub fn inner_simulator_display(&self) -> &SimulatorDisplay<Color> {
+//         &self.0
+//     }
+// }
+//
 
 
 
@@ -63,14 +58,6 @@ pub enum ConnectionDirection {
 
 pub struct DisplayBoxed<T: Dimensions + DrawTarget>(pub Box<T>);
 
-
-// this is some code for the simulator display that is located in bin/simulator.rs
-impl DisplayBoxed<SimulatorDisplay<Color>> {
-    pub fn inner_simulator_display(&self)-> &SimulatorDisplay<Color>{
-        &self.0
-    }
-
-}
 
 // pass through the functions for the display. in the recent version of epd-waveshare the
 // display trait seems to have been removed
@@ -177,56 +164,7 @@ where
         self.0.size()
     }
 }
-pub fn init_display<'a>(
-    spi2: SPI2,
-    gpio48: Gpio48,
-    gpio38: Gpio38,
-    gpio21: Gpio21,
-    gpio10: Gpio10,
-    gpio18: Gpio18,
-    gpio17: Gpio17,
-) -> anyhow::Result<(
-    DisplayBoxed<epd2in9_v2::Display2in9>,
-    Epd2in9<
-        SpiDeviceDriver<'a, SpiDriver<'a>>,
-        //PinDriver<'a, Gpio21, Output>,
-        PinDriver<'a, Gpio10, Input>,
-        PinDriver<'a, Gpio18, Output>,
-        PinDriver<'a, Gpio17, Output>,
-        Ets,
-    >,
-    SpiDeviceDriver<'a, SpiDriver<'a>>,
-)> {
-    let mut driver = spi::SpiDeviceDriver::new_single(
-        spi2,
-        gpio48,
-        gpio38,
-        Option::<gpio::AnyIOPin>::None,
-        Option::<gpio::AnyOutputPin>::None,
-        &spi::SpiDriverConfig::new().dma(spi::Dma::Disabled),
-        &spi::SpiConfig::new().baudrate(Hertz::from(26)),
-    )?;
-    // this seems to no longer be neccesary in epd-waveshare
-    let _cs = gpio::PinDriver::output(gpio21)?;
 
-    let busy = gpio::PinDriver::input(gpio10)?;
-
-    let dc = gpio::PinDriver::output(gpio18)?;
-
-    let rst = gpio::PinDriver::output(gpio17)?;
-
-    let epd = match epd2in9_v2::Epd2in9::new(&mut driver, busy, dc, rst, &mut delay::Ets, None) {
-        std::result::Result::Ok(epd) => epd,
-        Err(e) => return Err(anyhow::Error::new(e)),
-    };
-
-    let display = Box::new(epd2in9_v2::Display2in9::default());
-    let mut dis_boxed = DisplayBoxed { 0: display };
-
-    dis_boxed.0.set_rotation(DisplayRotation::Rotate90);
-    dis_boxed.clear(epd_waveshare::color::Color::White.into())?;
-    return Ok((dis_boxed, epd, driver));
-}
 #[rustfmt::skip]
 static HOUSE_PATTERN: [u8; 270] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1297,7 +1235,7 @@ where
 
         Ok(())
     }
-    pub fn update_weather_data(&mut self, weather_data: HourlyNew) -> anyhow::Result<()> {
+    pub fn update_weather_data(&mut self, weather_data: prototypes::types::HourlyNew) -> anyhow::Result<()> {
         let offsets = &[20, 50, 80, 110];
         self.fill_solid(
             &Rectangle::new(Point::new(172, 18), Size::new(130, 50)),

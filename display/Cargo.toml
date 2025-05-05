@@ -1,0 +1,27 @@
+[package]
+name = "display"
+edition = "2021"
+
+
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+
+[dependencies]
+tungstenite = "0.26.1"
+heapless = "0.8.0"
+#embedded-graphics-simulator = {version = "0.7.0", default-features = false}
+embedded-graphics = {version = "0.8.1"}
+anyhow = {version = "1.0.79"}
+embedded-graphics-core = {version = "0.4.0"}
+epd-waveshare = {version = "0.6.0"}
+prost = {version = "0.13.2", features  = ["prost-derive"]}
+prost-types = "0.13"
+
+[build-dependencies]
+prost-build = {version = "0.13.4"}

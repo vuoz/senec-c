@@ -1,0 +1,48 @@
+[package]
+name = "firmware"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+rust-version = "1.71"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+
+
+
+[features]
+default = ["std", "embassy", "esp-idf-svc/native"]
+
+pio = ["esp-idf-svc/pio"]
+std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]
+alloc = ["esp-idf-svc/alloc"]
+nightly = ["esp-idf-svc/nightly"]
+experimental = ["esp-idf-svc/experimental"]
+embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-svc/embassy-time-driver"]
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+esp-idf-svc = { version = "0.50.0", default-features = false }
+esp-idf-hal ={ version = "0.45.2", default-features = false}
+embedded-svc = "0.28"
+rand = "0.8.5"
+embedded-hal = "0.2.7"
+heapless = "0.8.0"
+
+embedded-graphics = {version = "0.8.1"}
+anyhow = {version = "1.0.79"}
+prost = {version = "0.13.2", default-features = false, features = ["derive"]}
+prost-types = {version = "0.13"}
+tungstenite = {version = "0.26.1"}
+embedded-graphics-core = {version = "0.4.0"}
+epd-waveshare = {version = "0.6.0"}
+display = {path = "../display"}
+
+[build-dependencies]
+dotenv = "0.15.0"
+embuild = {version = "0.31.3", features = ["espidf"] }

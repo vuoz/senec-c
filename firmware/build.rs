@@ -1,7 +1,6 @@
 use dotenv::dotenv;
-fn main() -> std::io::Result<()> {
-    prost_build::compile_protos(&["src/types.proto"], &["src/"])?;
 
+fn main() -> std::io::Result<()> {
     // read the env vars from .env and set them as rustc env vars so the compiler can read them
     // and include them on compile time
 

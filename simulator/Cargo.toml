@@ -1,0 +1,15 @@
+[package]
+name = "simulator"
+edition = "2021"
+
+
+[dependencies]
+embedded-graphics-simulator = {workspace = true}
+embedded-graphics = {workspace = true}
+anyhow = {workspace = true}
+prost = {workspace = true}
+prost-types = {workspace = true}
+tungstenite = {workspace = true}
+embedded-graphics-core = {workspace = true}
+epd-waveshare = {workspace = true}
+display = {path = "../display"}

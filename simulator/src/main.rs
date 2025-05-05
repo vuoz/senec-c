@@ -1,18 +1,30 @@
 use anyhow::*;
+use display::*;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::prelude::*;
 use embedded_graphics_simulator::{OutputSettingsBuilder, SimulatorDisplay};
 use epd_waveshare::color::Color;
-use senec_c::display::DisplayBoxed;
+
+// we need this to be able to extend the DisplayBoxed to be able to return the inner simulator
+// display
+trait SimulatorDisplayInner {
+    fn inner_simulator_display(&self) -> &SimulatorDisplay<Color>;
+}
+
+impl SimulatorDisplayInner for DisplayBoxed<SimulatorDisplay<Color>> {
+    fn inner_simulator_display(&self) -> &SimulatorDisplay<Color> {
+        &self.0
+    }
+}
 
 pub fn main() -> anyhow::Result<()> {
     let display_raw: SimulatorDisplay<Color> =
-        embedded_graphics_simulator::SimulatorDisplay::new(Size::new(128, 296));
+        embedded_graphics_simulator::SimulatorDisplay::new(Size::new(296, 128));
     let mut display = DisplayBoxed(Box::new(display_raw));
     let mut window = embedded_graphics_simulator::Window::new(
         "E-Paper Simulator",
         &OutputSettingsBuilder::new()
-            .theme(embedded_graphics_simulator::BinaryColorTheme::LcdGreen)
+            .theme(embedded_graphics_simulator::BinaryColorTheme::Default)
             .build(),
     );
 
