@@ -4,12 +4,16 @@ edition = "2021"
 
 
 [dependencies]
-embedded-graphics-simulator = {workspace = true}
-embedded-graphics = {workspace = true}
-anyhow = {workspace = true}
-prost = {workspace = true}
-prost-types = {workspace = true}
-tungstenite = {workspace = true}
-embedded-graphics-core = {workspace = true}
-epd-waveshare = {workspace = true}
+embedded-graphics-simulator = {version = "0.7.0"}
+embedded-graphics = {version = "0.8.1"}
+tungstenite = {version = "0.26.1"}
+log = { version = "0.4"}
+anyhow = {version= "1.0.79"}
+
+prost = {version = "0.13.2"}
+prost-types = {version = "0.13"}
+embedded-graphics-core = {version = "0.4.0"}
+
+
+epd-waveshare = {version = "0.6.0"}
 display = {path = "../display"}
