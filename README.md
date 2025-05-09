@@ -1,5 +1,35 @@
 ### Senec Client
 
+### Repo Overview
+
+#### Firmware
+This contains the actual firmware for the soc with all the functionality.
+This builds using a different toolchain. Please check the readme for [esp-idf-template](https://github.com/esp-rs/esp-idf-template) (which this was originally based  on) for more information regarding dependencies and tools you will need to compile this project.
+Build and flash the firmware
+```shell
+cd firmware 
+CRATE_CC_NO_DEFAULTS=1 cargo run -- --partition-table partition.csv
+```
+#### Display
+This crate contains all the code for the display. It handels UI elements and defines an interface on how to use the display.
+Both the firmware and the simulator make use of this crate. 
+
+#### Simulator
+This contains a simulator, which does not simulate the soc but the display.
+This is used to rapidly prototype changes to the ui.
+Both the actual firmware and the simulator make use of the /display crate that defines how content is displayed on the display.
+
+
+
+Build and run the simulator:
+```shell
+cd simulator
+cargo run
+```
+
+
+
+
 ### Reproduce
 Add .env file!
 
@@ -16,7 +46,6 @@ This contains all the progress including the very first commit
 Build on Linux/MacOS ( check dependencies of espflash etc.):
 ```shell
 cargo run  -- --partition-table partition.csv
-
 ```
 Build on Windows using wsl ( again check the dependencies of espflash etc.):
 ```shell
