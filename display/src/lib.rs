@@ -315,6 +315,7 @@ where
             .text_color(epd_waveshare::color::Color::Black)
             .build();
 
+
         let line_style = PrimitiveStyle::with_stroke(epd_waveshare::color::Color::Black, 1);
         Line::new(Point::new(153, 124), Point::new(286, 124))
             .into_styled(line_style)
@@ -378,6 +379,8 @@ where
             .collect::<Vec<Point>>();
 
         Polyline::new(&points).into_styled(line_style).draw(self)?;
+
+        Text::new("Prediction",Point::new(256,76),desc_text_style).draw(self)?;
 
         Ok(())
     }
