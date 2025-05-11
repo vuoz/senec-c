@@ -69,6 +69,9 @@ pub fn main() -> anyhow::Result<()> {
         log::info!("Error: {:?}", response.status());
         return Err(anyhow!("Error: {:?}", response.status()));
     }
+
+    display.set_connected()?;
+
     let mut prevs = PrevText::default();
     let mut prev_connections = PrevConnections {
         battery: "0.00".to_string(),
