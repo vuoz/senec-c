@@ -17,3 +17,15 @@ tungstenite = "0.26.1"
 embedded-graphics-core = "0.4.0"
 epd-waveshare = "0.6.0"
 prost-build = {version = "0.13.4"}
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

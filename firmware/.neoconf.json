@@ -11,7 +11,13 @@
                 "--all-targets"
             ],
             "rust-analyzer.cargo.extraEnv": {
-                "CRATE_CC_NO_DEFAULTS": "1"
+                "CRATE_CC_NO_DEFAULTS": "1",
+                "ESP_IDF_SYS_ROOT_CRATE": "firmware"
+            },
+            "rust-analyzer.runnables.extraEnv": {
+                "CRATE_CC_NO_DEFAULTS": "1",
+                "ESP_IDF_SYS_ROOT_CRATE": "firmware",
+                "CARGO_PROFILE_DEV_BUILD_OVERRIDE_DEBUG": true
             },
             "rust-analyzer.checkOnSave": true
         }

@@ -17,3 +17,4 @@ embedded-graphics-core = {version = "0.4.0"}
 
 epd-waveshare = {version = "0.6.0"}
 display = {path = "../display"}
+dioxus-devtools = "0.7.0-alpha.0"

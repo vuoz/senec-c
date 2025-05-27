@@ -20,5 +20,5 @@ ESP_IDF_VERSION = "v5.1.1"
 
 ## macos aarch fix for cc error
 CRATE_CC_NO_DEFAULTS="1"
-
+ESP_IDF_SYS_ROOT_CRATE= "firmware"
 
