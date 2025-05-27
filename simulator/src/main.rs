@@ -1,6 +1,5 @@
-use dioxus_devtools::subsecond::HotFn;
 use display::prototypes::types::data::Oneof;
-use display::prototypes::types::{self, Data};
+use display::prototypes::types::Data;
 use display::*;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::prelude::*;
@@ -93,16 +92,23 @@ pub fn main() -> anyhow::Result<()> {
         match socket.read() {
             Ok(message) => match message {
                 tungstenite::Message::Binary(data) => match Data::decode(data) {
-                    Ok(data_enum) => {
+                    Ok(ref data_enum) => {
+                        // this function is hot patched once it changes, thanks to the subsecond
+                        // crate
                         dioxus_devtools::subsecond::call(|| {
-                            let _ = render(
+                            match render(
                                 &mut display,
-                                data_enum.clone(),
+                                data_enum,
                                 &mut prev_connections,
                                 &mut prevs,
                                 &mut flushed,
                                 &mut rescaled,
-                            );
+                            ) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    eprintln!("Error occured while rendering: {:?}", e);
+                                }
+                            };
                         });
                     }
 
@@ -125,18 +131,18 @@ pub fn main() -> anyhow::Result<()> {
 }
 fn render(
     display: &mut DisplayBoxed<SimulatorDisplay<Color>>,
-    data: prototypes::types::Data,
+    data: &prototypes::types::Data,
     prev_connections: &mut PrevConnections,
     prevs: &mut PrevText,
     flushed: &mut bool,
     rescaled: &mut [f32; 288],
 ) -> anyhow::Result<()> {
+    println!("received data, starting to render");
     let default_text_style = MonoTextStyleBuilder::new()
         .font(&embedded_graphics::mono_font::ascii::FONT_6X10)
         .text_color(Color::Black)
         .build();
-    println!("received data");
-    match data.oneof {
+    match &data.oneof {
         Some(Oneof::UiData(ui_data)) => {
             display.clear_text()?;
             let house_pow = match &ui_data.gui_house_pow {
@@ -249,8 +255,8 @@ fn render(
                 display.draw_connections(ConnectionDirection::Left(false))?;
             }
 
-            if let Some(weather) = ui_data.weather {
-                if let Some(daily) = weather.daily {
+            if let Some(weather) = &ui_data.weather {
+                if let Some(daily) = &weather.daily {
                     let sunrise = daily
                         .sunrise
                         .first()
@@ -261,11 +267,11 @@ fn render(
                         .ok_or(anyhow!("missing sunset values"))?;
                     display.update_sun_data(sunrise, sunset)?;
                 }
-                if let Some(hourly) = weather.hourly {
-                    display.update_weather_data(hourly)?;
+                if let Some(hourly) = &weather.hourly {
+                    display.update_weather_data(hourly.clone())?;
                 }
             }
-            if let Some(total_data) = ui_data.total_data {
+            if let Some(total_data) = &ui_data.total_data {
                 if total_data.new || *flushed {
                     display.update_total_new(&total_data.consumption, &total_data.generated)?;
                 }
@@ -285,7 +291,7 @@ fn render(
             display.update_chart(rescaled)?;
         }
         None => {
-            eprintln!("error")
+            eprintln!("Data that was received is None")
         }
     }
     Ok(())
